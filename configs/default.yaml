@@ -1,0 +1,45 @@
+# Default configuration for TFT Holding Prediction (CPU-only).
+# All paths are relative to the repository root.
+
+data:
+  # Real CSV with the same schema as input_template.csv goes here.
+  csv_path: data/raw/holdings.csv
+  # Half-yearly cutoffs to keep (month-day strings).
+  half_year_endings: ["06-30", "12-31"]
+  # Encoder length in number of half-years (matches *_lag1..6).
+  encoder_length: 6
+  # Decoder length: predict 1 step ahead (next half-year).
+  decoder_length: 1
+
+label:
+  # Source column for the continuous regression target.
+  source_column: "增减持-相对变化"
+  # Thresholds for deriving 3-class labels (buy / hold / sell).
+  buy_threshold: 0.10
+  sell_threshold: -0.10
+
+model:
+  # Quantiles for the pinball loss (median + 80% interval).
+  quantiles: [0.1, 0.5, 0.9]
+  hidden_size: 32
+  lstm_layers: 1
+  attention_heads: 2
+  dropout: 0.1
+  # Categorical embedding dimension for fund_code / stock_code.
+  embedding_dim: 8
+
+training:
+  batch_size: 256
+  max_epochs: 30
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-5
+  early_stopping_patience: 5
+  num_workers: 0
+  device: "cpu"
+  seed: 42
+
+splits:
+  # Use rolling time-based CV on the sorted half-year period index.
+  # validation = last `val_periods` train half-years before test.
+  val_periods: 1
+  test_periods: 1
