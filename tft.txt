@@ -1,0 +1,1140 @@
+                                            International Journal of Forecasting 37 (2021) 1748–1764
+
+
+
+                                                Contents lists available at ScienceDirect
+
+
+                                    International Journal of Forecasting
+                                       journal homepage: www.elsevier.com/locate/ijforecast
+
+
+
+
+Temporal Fusion Transformers for interpretable multi-horizon
+time series forecasting
+                     ∗
+Bryan Lim a , ,1 , Sercan Ö. Arık b , Nicolas Loeff b , Tomas Pfister b
+a
+    University of Oxford, UK
+b
+    Google Cloud AI, USA
+
+
+
+article                  info                     a b s t r a c t
+
+Keywords:                                         Multi-horizon forecasting often contains a complex mix of inputs – including static
+Deep learning                                     (i.e. time-invariant) covariates, known future inputs, and other exogenous time series
+Interpretability                                  that are only observed in the past – without any prior information on how they
+Time series
+                                                  interact with the target. Several deep learning methods have been proposed, but
+Multi-horizon forecasting
+                                                  they are typically ‘black-box’ models that do not shed light on how they use the
+Attention mechanisms
+Explainable AI                                    full range of inputs present in practical scenarios. In this paper, we introduce the
+                                                  Temporal Fusion Transformer (TFT) – a novel attention-based architecture that combines
+                                                  high-performance multi-horizon forecasting with interpretable insights into temporal
+                                                  dynamics. To learn temporal relationships at different scales, TFT uses recurrent layers
+                                                  for local processing and interpretable self-attention layers for long-term dependencies.
+                                                  TFT utilizes specialized components to select relevant features and a series of gating
+                                                  layers to suppress unnecessary components, enabling high performance in a wide range
+                                                  of scenarios. On a variety of real-world datasets, we demonstrate significant performance
+                                                  improvements over existing benchmarks, and highlight three practical interpretability
+                                                  use cases of TFT.
+                                                           © 2021 The Authors. Published by Elsevier B.V. on behalf of International Institute of
+                                                                             Forecasters. This is an open access article under the CC BY license
+                                                                                               (http://creativecommons.org/licenses/by/4.0/).
+
+
+
+1. Introduction                                                             in retail (Böse et al., 2017; Courty & Li, 1999), health-
+                                                                            care (Lim, Alaa, & van der Schaar, 2018; Zhang & Nawata,
+   Multi-horizon forecasting, i.e. the prediction of                        2018) and economics (Capistran, Constandse, & Ramos-
+variables-of-interest at multiple future time steps, is a                   Francia, 2010) – performance improvements to existing
+crucial problem within time series machine learning. In                     methods in such applications are highly valuable.
+contrast to one-step-ahead predictions, multi-horizon                          Practical multi-horizon forecasting applications com-
+forecasts provide users with access to estimates across                     monly have access to a variety of data sources, as shown
+the entire path, allowing them to optimize their actions                    in Fig. 1, including known information about the fu-
+at multiple steps in the future (e.g. retailers optimizing                  ture (e.g. upcoming holiday dates), other exogenous time
+the inventory for the entire upcoming season, or clinicians                 series (e.g. historical customer foot traffic), and static
+optimizing a treatment plan for a patient). Multi-horizon                   metadata (e.g. location of the store) – without any prior
+forecasting has many impactful real-world applications                      knowledge on how they interact. This heterogeneity of
+                                                                            data sources together with little information about their
+    ∗ Corresponding author.                                                 interactions makes multi-horizon time series forecasting
+      E-mail addresses: blim@robots.ox.ac.uk (B. Lim),
+                                                                            particularly challenging.
+soarik@google.com (S.Ö. Arık), nloeff@google.com (N. Loeff),                   Deep neural networks (DNNs) have increasingly been
+tpfister@google.com (T. Pfister).                                           used in multi-horizon forecasting, demonstrating strong
+  1 Completed as part of internship with Google Cloud AI Research.          performance improvements over traditional time series
+
+https://doi.org/10.1016/j.ijforecast.2021.03.012
+0169-2070/© 2021 The Authors. Published by Elsevier B.V. on behalf of International Institute of Forecasters. This is an open access article under
+the CC BY license (http://creativecommons.org/licenses/by/4.0/).
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                             International Journal of Forecasting 37 (2021) 1748–1764
+
+
+                                                                                   timesteps are typically significant in time series. On the
+                                                                                   other hand, some attention-based architectures are pro-
+                                                                                   posed with inherent interpretability for sequential data,
+                                                                                   primarily language or speech – such as the Transformer
+                                                                                   architecture (Vaswani, Shazeer, Parmar, Uszkoreit, Jones,
+                                                                                   Gomez, Kaiser, & Polosukhin, 2017). The fundamental
+                                                                                   caveat to apply them is that multi-horizon forecasting in-
+                                                                                   cludes many different types of input features, as opposed
+                                                                                   to language or speech. In their conventional form, these
+                                                                                   architectures can provide insights into relevant time steps
+                                                                                   for multi-horizon forecasting, but they cannot distinguish
+                                                                                   the importance of different features at a given timestep.
+                                                                                   Overall, in addition to the need for new methods to tackle
+                                                                                   the heterogeneity of data in multi-horizon forecasting for
+                                                                                   high performance, new methods are also needed to render
+                                                                                   these forecasts interpretable, given the needs of the use
+                                                                                   cases.
+Fig. 1. Illustration of multi-horizon forecasting with static covariates,
+past observed and a priori-known future time-dependent inputs.                         In this paper, we propose the Temporal Fusion Trans-
+                                                                                   former (TFT) – an attention-based DNN architecture for
+                                                                                   multi-horizon forecasting that achieves high performance
+                                                                                   while enabling new forms of interpretability. To obtain
+models (Alaa & van der Schaar, 2019; Makridakis, Spiliotis,
+                                                                                   significant performance improvements over state-of-the-
+& Assimakopoulos, 2020; Rangapuram et al., 2018). While
+                                                                                   art benchmarks, we introduce multiple novel ideas to
+many architectures have focused on variants of recurrent
+                                                                                   align the architecture with the full range of potential in-
+neural network (RNN) architectures (Rangapuram et al.,
+                                                                                   puts and temporal relationships common to multi-horizon
+2018; Salinas, Flunkert, Gasthaus, & Januschowski, 2019;
+                                                                                   forecasting – specifically incorporating (1) static covariate
+Wen et al., 2017), recent improvements have also used
+                                                                                   encoders which encode context vectors for use in other
+attention-based methods to enhance the selection of rel-
+                                                                                   parts of the network, (2) gating mechanisms throughout
+evant time steps in the past (Fan et al., 2019) – including
+                                                                                   and sample-dependent variable selection to minimize
+transformer-based models (Li et al., 2019). However, these
+often fail to consider the different types of inputs com-                          the contributions of irrelevant inputs, (3) a sequence-to-
+monly present in multi-horizon forecasting, and either                             sequence layer to locally process known and observed
+assume that all exogenous inputs are known into the                                inputs, and (4) a temporal self-attention decoder to learn
+future (Li et al., 2019; Rangapuram et al., 2018; Salinas                          any long-term dependencies present within the dataset.
+et al., 2019) – a common problem with autoregressive                               The use of these specialized components also facilitates
+models – or neglect important static covariates (Wen                               interpretability; in particular, we show that TFT enables
+et al., 2017) – which are simply concatenated with other                           three valuable interpretability use cases: helping users
+time-dependent features at each step. Many recent im-                              identify (i) globally-important variables for the prediction
+provements in time series models have resulted from                                problem, (ii) persistent temporal patterns, and (iii) sig-
+the alignment of architectures with unique data charac-                            nificant events. On a variety of real-world datasets, we
+teristics (Koutník, Greff, Gomez, & Schmidhuber, 2014;                             demonstrate how TFT can be practically applied, as well
+Neil et al., 2016). We argue and demonstrate that sim-                             as the insights and benefits it provides.
+ilar performance gains can also be reaped by designing
+networks with suitable inductive biases for multi-horizon                          2. Related work
+forecasting.
+    In addition to not considering the heterogeneity of                                DNNs for Multi-horizon Forecasting: Similarly to tra-
+common multi-horizon forecasting inputs, most current                              ditional multi-horizon forecasting methods (Marcellino,
+architectures are ‘black-box’ models where forecasts are                           Stock, & Watson, 2006; Taieb, Sorjamaa, & Bontempi,
+controlled by complex nonlinear interactions between                               2010), recent deep learning methods can be categorized
+many parameters. This makes it difficult to explain how                            into iterated approaches using autoregressive models (Li
+models arrive at their predictions, and in turn, makes                             et al., 2019; Rangapuram et al., 2018; Salinas et al., 2019)
+it challenging for users to trust a model’s outputs and                            or direct methods based on sequence-to-sequence mod-
+model builders to debug it. Unfortunately, commonly                                els (Fan et al., 2019; Wen et al., 2017).
+used explainability methods for DNNs are not well suited                               Iterated approaches utilize one-step-ahead prediction
+for applying to time series. In their conventional form,                           models, with multi-step predictions obtained by recur-
+post hoc methods (e.g. LIME (Ribeiro et al., 2016) and                             sively feeding predictions into future inputs. Approaches
+SHAP (Lundberg & Lee, 2017)) do not consider the time or-                          with Long Short-term Memory (LSTM) (Hochreiter &
+dering of input features. For example, for LIME, surrogate                         Schmidhuber, 1997) networks have been considered, such
+models are independently constructed for each data point,                          as Deep AR (Salinas et al., 2019) which uses stacked
+and for SHAP, features are considered independently for                            LSTM layers to generate parameters of one-step-ahead
+neighboring time steps. Such post hoc approaches would                             Gaussian predictive distributions. Deep State-Space Mod-
+lead to poor explanation quality as dependencies between                           els (DSSM) (Rangapuram et al., 2018) adopt a similar
+                                                                            1749
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                       International Journal of Forecasting 37 (2021) 1748–1764
+
+
+approach, utilizing LSTMs to generate parameters of a                  distilling into a surrogate interpretable model, or decom-
+predefined linear state-space model with predictive dis-               posing into feature attributions. They are not designed
+tributions produced via Kalman filtering – with exten-                 to take into account the time ordering of inputs, lim-
+sions for multivariate time series data in Wang et al.                 iting their use for complex time series data. Inherently
+(2019). More recently, Transformer-based architectures                 interpretable modeling approaches build components for
+have been explored in Li et al. (2019), which proposes                 feature selection directly into the architecture. For time
+the use of convolutional layers for local processing and               series forecasting specifically, they are based on explicitly
+a sparse attention mechanism to increase the size of the               quantifying time-dependent variable contributions. For
+receptive field during forecasting. Despite their simplicity,          example, Interpretable Multi-Variable LSTMs (Guo et al.,
+iterative methods rely on the assumption that the values               2019) partitions the hidden state such that each vari-
+of all variables excluding the target are known at forecast            able contributes uniquely to its own memory segment,
+time – such that only the target needs to be recursively               and weights memory segments to determine variable
+fed into future inputs. However, in many practical sce-                contributions. Methods combining temporal importance
+narios, numerous useful time-varying inputs exist, with                and variable selection have also been considered in Choi
+many unknown in advance. Their straightforward use is                  et al. (2016), which computes a single contribution coeffi-
+hence limited for iterative approaches. TFT, on the other              cient based on attention weights from each. However, in
+hand, explicitly accounts for the diversity of inputs –                addition to the shortcoming of modeling only one-step-
+naturally handling static covariates and (past-observed                ahead forecasts, existing methods also focus on instance-
+and future-known) time-varying inputs.                                 specific (i.e. sample-specific) interpretations of attention
+    In contrast, direct methods are trained to explicitly              weights – without providing insights into global tem-
+generate forecasts for multiple predefined horizons at                 poral dynamics. In contrast, the use cases in Section 7
+each time step. Their architectures typically rely on                  demonstrate that TFT is able to analyze global temporal
+sequence-to-sequence models, e.g. LSTM encoders to sum-                relationships and allows users to interpret global behav-
+marize past inputs, and a variety of methods to generate               iors of the model on the whole dataset – specifically in the
+future predictions. The Multi-horizon Quantile Recurrent               identification of any persistent patterns (e.g. seasonality
+Forecaster (MQRNN) (Wen et al., 2017) uses LSTM or con-                or lag effects) and regimes present.
+volutional encoders to generate context vectors which are
+                                                                       3. Multi-horizon forecasting
+fed into multi-layer perceptrons (MLPs) for each horizon.
+In Fan et al. (2019) a multi-modal attention mechanism is
+                                                                          Let there be I unique entities in a given time series
+used with LSTM encoders to construct context vectors for
+                                                                       dataset – such as different stores in retail or patients in
+a bi-directional LSTM decoder. Despite performing better
+                                                                       healthcare. Each entity i is associated with a set of static
+than LSTM-based iterative methods, interpretability re-
+                                                                       covariates si ∈ Rms , as well as inputs χi,t ∈ Rmχ and
+mains challenging for such standard direct methods. In
+                                                                       scalar targets yi,t ∈ R at each time-step t ∈ [0, Ti ].
+contrast, we show that by interpreting attention patterns,
+                                                                       Time-dependent [input features       are subdivided into two
+TFT can provide insightful explanations about temporal                                                 ]T
+                                                                       categories χi,t = z Ti,t , xTi,t – observed inputs z i,t ∈ R(mz )
+dynamics, and do so while maintaining state-of-the-art
+                                                                       which can only be measured at each step and are un-
+performance on a variety of datasets.
+                                                                       known beforehand, and known inputs xi,t ∈ Rmx which
+    Time Series Interpretability with Attention: Atten-
+                                                                       can be predetermined (e.g. the day-of-week at time t).
+tion mechanisms are used in translation (Vaswani et al.,
+                                                                          In many scenarios, the provision for prediction in-
+2017), image classification (Wang, Jiang, Qian, Yang, Li,
+                                                                       tervals can be useful for optimizing decisions and risk
+Zhang, Wang, & Tang, 2017) or tabular learning (Arik
+                                                                       management by yielding an indication of likely best and
+& Pfister, 2019) to identify salient portions of input for
+                                                                       worst-case values that the target can take. As such, we
+each instance using the magnitude of attention weights.
+                                                                       adopt quantile regression to our multi-horizon forecast-
+Recently, they have been adapted for time series with
+                                                                       ing setting (e.g. outputting the 10th, 50th and 90th per-
+interpretability motivations (Alaa & van der Schaar, 2019;
+                                                                       centiles at each time step). Each quantile forecast takes
+Choi et al., 2016; Li et al., 2019), using LSTM-based (Song
+                                                                       the form:
+et al., 2018) and transformer-based (Li et al., 2019) ar-
+                                                                       ŷi (q, t , τ ) = fq τ , yi,t −k:t , z i,t −k:t , xi,t −k:t +τ , si ,
+                                                                                            (                                           )
+chitectures. However, this was done without considering                                                                                        (1)
+the importance of static covariates (as the above methods
+                                                                       where ŷi,t +τ (q, t , τ ) is the predicted qth sample quan-
+blend variables at each input). TFT alleviates this by using
+                                                                       tile of the τ -step-ahead forecast at time t, and fq (.) is
+separate encoder–decoder attention for static features at
+                                                                       a prediction model. In line with other direct methods,
+each time step on top of the self-attention to determine
+                                                                       we simultaneously output forecasts for τmax time steps
+the contribution time-varying inputs.
+                                                                       – i.e. τ ∈ {1, . . . , τmax }. We incorporate all past infor-
+    Instance-wise Variable Importance with DNNs: In-
+                                                                       mation within a finite look-back window k, using target
+stance (i.e. sample)-wise variable importance can be ob-
+                                                                       and known inputs only up till     { and including    } the forecast
+tained with post-hoc explanation methods (Lundberg &
+                                                                       start time t (i.e. yi,t −k:t = yi,t −k , . . . , yi,t ) and
+                                                                                                                                { known
+Lee, 2017; Ribeiro et al., 2016; Yoon, Arik, & Pfister, 2019)
+                                                                       inputs across the entire range (i.e. xi,t −k:t +τ = xi,t −k , . . .,
+and inherently interpretable models (Choi et al., 2016;
+                                                                       xi,t , . . . , xi,t +τ ).2
+                                                                                             }
+Guo, Lin, & Antulov-Fantulin, 2019). Post-hoc explanation
+methods, e.g. LIME (Ribeiro et al., 2016), SHAP (Lundberg
+& Lee, 2017) and RL-LIM (Yoon et al., 2019), are ap-                     2 For notation simplicity, we omit the subscript i unless explicitly
+plied on pre-trained black-box models and often based on               required.
+
+                                                                1750
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                         International Journal of Forecasting 37 (2021) 1748–1764
+
+
+
+
+Fig. 2. TFT architecture. TFT inputs static metadata, time-varying past inputs and time-varying a priori known future inputs. Variable Selection is
+used for judicious selection of the most salient features based on the input. Gated Residual Network blocks enable efficient information flow with
+skip connections and gating layers. Time-dependent processing is based on LSTMs for local processing, and multi-head attention for integrating
+information from any time step.
+
+
+4. Model architecture                                                         non-linear processing, and there may be instances where
+                                                                              simpler models can be beneficial – e.g. when datasets are
+    We design TFT to use canonical components to effi-                        small or noisy. With the motivation of giving the model
+ciently build feature representations for each input type                     the flexibility to apply non-linear processing only where
+(i.e. static, known, observed inputs) for high forecasting                    needed, we propose Gated Residual Network (GRN) as
+performance on a wide range of problems. The major                            shown in Fig. 2 as a building block of TFT. The GRN takes
+constituents of TFT are:                                                      in a primary input a and an optional context vector c and
+1. Gating mechanisms to skip over any unused compo-                           yields:
+    nents of the architecture, providing adaptive depth and
+                                                                              GRNω (a, c ) = LayerNorm a + GLUω (η1 ) ,
+                                                                                                             (                )
+    network complexity to accommodate a wide range of                                                                                          (2)
+    datasets and scenarios.                                                             η1 = W 1,ω η2 + b1,ω ,                                 (3)
+2. Variable selection networks to select relevant input
+                                                                                        η2 = ELU W 2,ω a + W 3,ω c + b2,ω ,
+                                                                                                 (                       )
+    variables at each time step.                                                                                                               (4)
+3. Static covariate encoders to integrate static features                     where ELU is the Exponential Linear Unit activation func-
+    into the network, through the encoding of context                         tion (Clevert, Unterthiner, & Hochreiter, 2016), η1 ∈
+    vectors to condition temporal dynamics.
+                                                                              Rdmodel , η2 ∈ Rdmodel are intermediate layers, LayerNorm is
+4. Temporal processing to learn both long- and short-                         standard layer normalization of Lei Ba, Kiros, and Hinton
+    term temporal relationships from both observed and
+                                                                              (2016), and ω is an index to denote weight sharing.
+    known time-varying inputs. A sequence-to-sequence
+                                                                              When W 2,ω a + W 3,ω c + b2,ω ≫ 0, the ELU activation
+    layer is employed for local processing, whereas long-
+                                                                              would act as an identity function and when W 2,ω a +
+    term dependencies are captured using a novel inter-
+                                                                              W 3,ω c + b2,ω ≪ 0, the ELU activation would generate
+    pretable multi-head attention block.
+                                                                              a constant output, resulting in linear layer behavior. We
+5. Prediction intervals via quantile forecasts to deter-
+                                                                              use component gating layers based on Gated Linear Units
+    mine the range of likely target values at each prediction
+                                                                              (GLUs) (Dauphin, Fan, Auli, & Grangier, 2017) to provide
+    horizon.
+                                                                              the flexibility to suppress any parts of the architecture
+    Fig. 2 shows the high-level architecture of Temporal
+                                                                              that are not required for a given dataset. Letting γ ∈
+Fusion Transformer (TFT), with individual components
+                                                                              Rdmodel be the input, the GLU then takes the form:
+described in detail in the subsequent sections.
+                                                                              GLUω (γ ) = σ (W 4,ω γ + b4,ω ) ⊙ (W 5,ω γ + b5,ω ),             (5)
+4.1. Gating mechanisms
+                                                                              where σ (.) is the sigmoid activation function, W (.) ∈
+    The precise relationship between exogenous inputs                         Rdmodel ×dmodel , b(.) ∈ Rdmodel are the weights and biases, ⊙
+and targets is often unknown in advance, making it dif-                       is the element-wise Hadamard product, and dmodel is the
+ficult to anticipate which variables are relevant. More-                      hidden state size (common across TFT). GLU allows TFT
+over, it is difficult to determine the extent of required                     to control the extent to which the GRN contributes to
+                                                                       1751
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                                         International Journal of Forecasting 37 (2021) 1748–1764
+
+
+the original input a – potentially skipping over the layer                           are then weighted by their variable selection weights and
+entirely if necessary as the GLU outputs could be all close                          combined:
+to 0 in order to suppress the nonlinear contribution. For                                     mχ
+                                                                                              ∑             (j)
+instances without a context vector, the GRN simply treats                            ξ̃ t =         vχ(j)t ξ̃ t ,                                                 (8)
+the contex input as zero – i.e. c = 0 in Eq. (4). During                                      j=1
+training, dropout is applied before the gating layer and
+layer normalization – i.e. to η1 in Eq. (3).                                         where vχ(j)t is the jth element of vector vχt .
+
+                                                                                     4.3. Static covariate encoders
+4.2. Variable selection networks
+                                                                                           In contrast with other time series forecasting architec-
+    While multiple variables may be available, their                                 tures, the TFT is carefully designed to integrate informa-
+relevance and specific contribution to the output are                                tion from static metadata, using separate GRN encoders
+typically unknown. TFT is designed to provide instance-                              to produce four different context vectors, c s , c e , c c , and
+wise variable selection through the use of variable se-                              c h . These contect vectors are wired into various locations
+lection networks applied to both static covariates and                               in the temporal fusion decoder (Section 4.5) where static
+time-dependent covariates. Beyond providing insights into                            variables play an important role in processing. Specif-
+which variables are most significant for the prediction                              ically, this includes contexts for (1) temporal variable
+problem, variable selection also allows TFT to remove                                selection (c s ), (2) local processing of temporal features
+                                                                                     (c c , c h ), and (3) enriching of temporal features with static
+any unnecessary noisy inputs which could negatively
+                                                                                     information (c e ). As an example, taking ζ to be the out-
+impact performance. Most real-world time series datasets
+                                                                                     put of the static variable selection network, contexts for
+contain features with less predictive content, thus vari-
+                                                                                     temporal variable selection would be encoded according
+able selection can greatly help model performance via
+                                                                                     to c s = GRNcs (ζ ).
+utilization of learning capacity only on the most salient
+ones.                                                                                4.4. Interpretable multi-head attention
+    We use entity embeddings (Gal & Ghahramani, 2016)
+for categorical variables as feature representations, and                               The TFT employs a self-attention mechanism to learn
+linear transformations for continuous variables – trans-                             long-term relationships across different time steps, which
+forming each input variable into a (dmodel )-dimensional                             we modify from multi-head attention in transformer-
+vector which matches the dimensions in subsequent lay-                               based architectures (Li et al., 2019; Vaswani et al., 2017)
+ers for skip connections. All static, past and future inputs                         to enhance explainability. In general, attention mecha-
+make use of separate variable selection networks with                                nisms scale values V ∈ RN ×dV based on relationships
+distinct weights (as denoted by different colors in the                              between keys K ∈ RN ×dattn and queries Q ∈ RN ×dattn as
+main architecture diagram of Fig. 2). Without loss of gen-                           below:
+erality, we present the variable selection network for past
+                                                                                     Attention(Q , K , V ) = A(Q , K )V ,                                         (9)
+inputs below – noting that those for other inputs take the
+same form.                                                                           where A() is a normalization function, and N is the num-
+          (j)
+    Let ξ t ∈ Rdmodel denote the transformed input of the                            ber of time steps feeding into the attention layer (i.e. k +
+                                     [
+                                         (1)T            (m )T
+                                                                 ]T                  τmax ). A common choice is scaled dot-product attention
+jth variable at time t, with Ξt = ξ t           , . . . , ξt χ        being          (Vaswani et al., 2017):
+the flattened vector of all past inputs at time t. Variable                                                                   √
+selection weights are generated by feeding both Ξt and                               A(Q , K ) = Softmax(Q K T / dattn ).                                    (10)
+an external context vector c s through a GRN, followed by                               To improve the learning capacity of the standard at-
+a Softmax layer:                                                                     tention mechanism, multi-head attention is proposed in
+                                                                                     Vaswani et al. (2017), employing different heads for dif-
+vχt = Softmax GRNvχ (Ξt , c s ) ,
+             (                 )
+                                                                        (6)
+                                                                                     ferent representation subspaces:
+where vχt ∈ Rmχ is a vector of variable selection weights,
+                                                                                     MultiHead(Q , K , V ) = [H 1 , . . . , H mH ] W H ,                     (11)
+and c s is obtained from a static covariate encoder (see
+                                                                                                                        (h)       (h)       (h)
+Section 4.3). For static variables, we note that the context                          H h = Attention(Q W Q , K W K , V W V ),                               (12)
+vector c s is omitted – given that it already has access to                                          (h)                          (h)                       (h)
+                                                                                     where W K ∈ Rdmodel ×dattn , W Q ∈ Rdmodel ×dattn , W V ∈
+static information.
+   At each time step, an additional layer of non-linear                              Rdmodel ×dV are head-specific weights for keys, queries and
+                                              (j)                                    values, and W H ∈ R(mH ·dV )×dmodel linearly combines out-
+processing is employed by feeding each ξ t through its
+                                                                                     puts concatenated from all heads H h .
+own GRN:
+                                                                                        Given that different values are used in each head,
+   (j)
+                ( )
+ξ̃ t = GRNξ̃ (j) ξ (j)
+                   t   ,                                                (7)          attention weights alone would not be indicative of a par-
+                                                                                     ticular feature’s importance. As such, we modify multi-
+           (j)                                                                       head attention to share values in each head, and employ
+where ξ̃ t is the processed feature vector for variable j.
+                                                                                     additive aggregation of all heads:
+We note that each variable has its own GRNξ (j) , with
+weights shared across all time steps t. Processed features                           InterpretableMultiHead(Q , K , V ) = H̃ W H ,                           (13)
+                                                                              1752
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                                      International Journal of Forecasting 37 (2021) 1748–1764
+
+
+H̃ = Ã(Q , K ) V W V ,                                                     (14)           c c , c h context vectors from the static covariate encoders
+       {     mH                                    )}                                      to initialize the cell state and hidden state respectively for
+           1 ∑ (                (h)          (h)
+   =                A Q WQ ,K WK                        V WV,               (15)           the first LSTM in the layer. We also employ a gated skip
+           mH                                                                              connection over this layer:
+              h=1
+             mH                                                                                                 (                          )
+        1 ∑                            (h)          (h)                                    φ̃(t , n) = LayerNorm ξ̃ t +n + GLUφ̃ (φ(t , n)) ,             (17)
+   =               Attention(Q        WQ     ,   K WK     , V W V ),        (16)
+       mH
+             h=1
+                                                                                           where n ∈ [−k, τmax ] is a position index.
+where W V ∈ Rdmodel ×dV are value weights shared across
+all heads, and W H ∈ Rdattn ×dmodel is used for final linear                               4.5.2. Static enrichment layer
+mapping.                                                                                      As static covariates often have a significant influence
+    Comparing Eqs. (9) and (14), we can see that the fi-                                   on the temporal dynamics (e.g. genetic information on
+nal output of interpretable multi-head attention bears a
+                                                                                           disease risk), we introduce a static enrichment layer that
+strong resemblance to a single attention layer – the key
+                                                                                           enhances temporal features with static metadata. For a
+difference lying in the methodology to generate atten-
+                                                                                           given position index n, static enrichment takes the form:
+tion weights Ã(Q , K ). From Eq.
+                               ( (15), each head) can learn                                                (              )
+                                                    (h)         (h)
+different temporal patterns A Q W Q , K W K                           , while at-          θ (t , n) = GRNθ φ̃(t , n), c e ,                              (18)
+tending to a common set of input features V – which
+can be interpreted as a simple ensemble over attention                                     where the weights of GRNφ are shared across the entire
+weights into combined matrix Ã(Q , K ) in Eq. (14). Com-                                  layer, and c e is a context vector from a static covariate
+pared to A(Q , K ) in Eq. (10), Ã(Q , K ) yields an increased                             encoder.
+representation capacity in an efficient way, while still
+allowing simple interpretability studies to be performed                                   4.5.3. Temporal self-attention layer
+by analyzing a single set of attention weights.                                                 Following static enrichment, we next apply self-
+                                                                                           attention. All static-enriched temporal features are first
+4.5. Temporal fusion decoder                                                               grouped into a single matrix – i.e. Θ(t) = [θ (t , −k), . . .,
+                                                                                           θ (t , τ )]T – and interpretable multi-head attention (see
+    The temporal fusion decoder uses the series of layers                                  Section 4.4) is applied at each forecast time (with N =
+described below to learn temporal relationships present                                    τmax + k + 1):
+in the dataset:
+                                                                                           B(t) = InterpretableMultiHead(Θ(t), Θ(t), Θ(t)),               (19)
+4.5.1. Locality enhancement with sequence-to-sequence
+layer                                                                                      to yield B(t) = [β(t , −k), . . . , β(t , τmax )]. dV = dattn =
+    In time series data, points of significance are often                                  dmodel /mH are chosen, where mH is the number of heads.
+identified in relation to their surrounding values – such as                               Decoder masking (Li et al., 2019; Vaswani et al., 2017)
+anomalies, change-points, or cyclical patterns. Leveraging                                 is applied to the multi-head attention layer to ensure
+local context, through the construction of features that                                   that each temporal dimension can only attend to fea-
+utilize pattern information on top of point-wise values,                                   tures preceding it. Besides preserving causal information
+can thus lead to performance improvements in attention-                                    flow via masking, the self-attention layer allows TFT to
+based architectures. For instance, Li et al. (2019) adopts                                 pick up long-range dependencies that may be challenging
+a single convolutional layer for locality enhancement –                                    for RNN-based architectures to learn. Following the self-
+extracting local patterns using the same filter across all                                 attention layer, an additional gating layer is also applied
+time. However, this might not be suitable for cases when                                   to facilitate training:
+observed inputs exist, due to the differing number of past
+and future inputs.                                                                         δ(t , n) = LayerNorm(θ (t , n) + GLUδ (β(t , n))).             (20)
+    As such, we propose the application of a sequence-
+to-sequence layer to naturally handle these differences                                    4.5.4. Position-wise feed-forward layer
+– feeding ξ̃ t −k:t into the encoder and ξ̃ t +1:t +τmax into the                             We apply additional non-linear processing to the out-
+decoder. This then generates a set of uniform temporal                                     puts of the self-attention layer. Similar to the static en-
+features which serve as inputs into the temporal fu-                                       richment layer, this makes use of GRNs:
+sion decoder itself, denoted by φ(t , n) ∈ {φ(t , −k), . . . ,
+ φ(t , τmax )} with n being a position index. Inspired by its                              ψ(t , n) = GRNψ (δ(t , n)) ,                                   (21)
+success in canonical sequential encoding problems, we                                      where the weights of GRNψ are shared across the entire
+consider the use of an LSTM encoder–decoder, a
+                                                                                           layer. As per Fig. 2, we also apply a gated residual con-
+commonly-used building block in other multi-horizon
+                                                                                           nection which skips over the entire transformer block,
+forecasting architectures (Fan et al., 2019; Wen et al.,
+                                                                                           providing a direct path to the sequence-to-sequence layer
+2017), although other designs can potentially be adopted
+                                                                                           – yielding a simpler model if additional complexity is not
+as well. This also serves as a replacement for standard po-
+                                                                                           required, as shown below:
+sitional encoding, providing an appropriate inductive bias                                                      (                            )
+for the time ordering of the inputs. Moreover, to allow
+                                                                                           ψ̃(t , n) = LayerNorm φ̃(t , n) + GLUψ̃ (ψ(t , n)) ,           (22)
+static metadata to influence local processing, we use the
+                                                                                    1753
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                                            International Journal of Forecasting 37 (2021) 1748–1764
+
+
+4.6. Quantile outputs                                                                            • Electricity: The UCI Electricity Load Diagrams Dataset,
+                                                                                                   containing the electricity consumption of 370 customers
+   In line with previous work (Wen et al., 2017), TFT also                                         – aggregated on an hourly level as in Yu, Rao, and
+generates prediction intervals on top of point forecasts.                                          Dhillon (2016). In accordance with (Salinas et al., 2019),
+This is achieved by the simultaneous prediction of various                                         we use the past week (i.e. 168 h) to forecast over the
+percentiles (e.g. 10th, 50th and 90th) at each time step.                                          next 24 h.
+Quantile forecasts are generated using a linear transfor-                                        • Traffic: The UCI PEM-SF Traffic Dataset describes the
+mation of the output from the temporal fusion decoder:                                             occupancy rate (with yt ∈ [0, 1]) of 440 SF Bay Area
+ŷ(q, t , τ ) = W q ψ̃ (t , τ ) + bq ,                                             (23)            freeways – as in Yu et al. (2016). It is also aggregated
+                                                                                                   on an hourly level as per the electricity dataset, with
+where W q ∈ R , bq ∈ R are linear coefficients for the
+                       1×d
+                                                                                                   the same look-back window and forecast horizon.
+specified quantile q. We note that forecasts are only gen-                                       • Retail: Favorita Grocery Sales Dataset from the Kaggle
+erated for horizons in the future – i.e. τ ∈ {1, . . . , τmax }.                                   competition (Favorita, 2018), that combines metadata
+                                                                                                   for different products and the stores, along with other
+5. Loss functions                                                                                  exogenous time-varying inputs sampled at the daily
+                                                                                                   level. We forecast log product sales 30 days into the
+  TFT is trained by jointly minimizing the quantile loss                                           future, using 90 days of past information.
+(Wen et al., 2017), summed across all quantile outputs:                                          • Volatility (or Vol.): The OMI realized library (Heber,
+                    τmax
+                         QL yt , ŷ(q, t − τ , τ ), q                                              Lunde, Shephard, & Sheppard, 2009) contains daily real-
+                           (                         )
+                 ∑ ∑∑
+L (Ω , W ) =                                                                       (24)            ized volatility values of 31 stock indices computed from
+                                                     M τmax
+                 yt ∈Ω q∈Q τ =1                                                                    intraday data, along with their daily returns. For our
+                                                                                                   experiments, we consider forecasts over the next week
+QL(y, ŷ, q) = q(y − ŷ)+ + (1 − q)(ŷ − y)+ ,                                     (25)            (i.e. 5 business days) using information over the past
+                                                                                                   year (i.e. 252 business days).
+where Ω is the domain of training data containing M
+samples, W represents the weights of TFT, Q is the set
+                                                                                                 6.2. Training procedure
+of output quantiles (we use Q = {0.1, 0.5, 0.9} in our
+experiments, and (.)+ = max(0, .). For out-of-sample
+                                                                                                    For each dataset, we partition all time series into
+testing, we evaluate the normalized quantile losses across
+                                                                                                 3 parts – a training set for learning, a validation set
+the entire forecasting horizon – focusing on P50 and P90
+                                                                                                 for hyperparameter tuning, and a hold-out test set for
+risk for consistency with previous work (Li et al., 2019;
+Rangapuram et al., 2018; Salinas et al., 2019):                                                  performance evaluation. Hyperparameter optimization is
+                              ∑τmax                                                              conducted via random search, using 240 iterations for
+                                               yt , ŷ(q, t − τ , τ ), q
+                 ∑                         (                               )
+             2       yt ∈Ω̃     τ =1 QL                                                          Volatility, and 60 iterations for others. Full search ranges
+q-Risk =                        ∑          ∑τmax                               ,   (26)
+                                                                                                 for all hyperparameters are below, with datasets and
+                                  yt ∈Ω̃         τ =1 |yt |
+                                                                                                 optimal model parameters listed in Table 1.
+where Ω̃ is the domain of test samples. Full details on
+hyperparameter optimization and training can be found                                               • State size – 10, 20, 40, 80, 160, 240, 320
+in Appendix A.                                                                                      • Dropout rate – 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.9
+                                                                                                    • Minibatch size – 64, 128, 256
+6. Performance evaluation                                                                           • Learning rate – 0.0001, 0.001, 0.01
+                                                                                                    • Max. gradient norm – 0.01, 1.0, 100.0
+6.1. Datasets                                                                                       • Num. heads – 1, 4
+
+   We choose datasets to reflect commonly observed                                                  To preserve explainability, we adopt only a single in-
+characteristics across a wide range of challenging multi-                                        terpretable multi-head attention layer. For ConvTrans (Li
+horizon forecasting problems. To establish a baseline and                                        et al., 2019), we use the same fixed stack size (3 layers)
+position with respect to prior academic work, we first                                           and number of heads (8 heads) as in Li et al. (2019). We
+evaluate performance on the Electricity and Traffic                                              keep the same attention model, and treat kernel sizes for
+datasets used in Li et al. (2019), Rangapuram et al. (2018),                                     the convolutional processing layer as a hyperparameter
+Salinas et al. (2019) – which focus on simpler univariate                                        (∈ {1, 3, 6, 9}) – as optimal kernel sizes are observed to
+time series containing known inputs only alongside the                                           be dataset dependent (Li et al., 2019). An open-source
+target. Next, the Retail dataset helps us benchmark the                                          implementation of the TFT on these datasets can be found
+model using the full range of complex inputs observed                                            on GitHub3 for full reproducibility.
+in multi-horizon prediction applications (see Section 3) –
+including rich static metadata and observed time-varying                                         6.3. Computational cost
+inputs. Finally, to evaluate robustness to over-fitting on
+smaller noisy datasets, we consider the financial appli-
+                                                                                                    Across all datasets, each TFT model was also trained
+cation of volatility forecasting – using a dataset much
+                                                                                                 on a single GPU, and can be deployed without the need
+smaller than others. Broad descriptions of each dataset
+can be found below, along with an exploratory analysis
+of dataset targets in Appendix B:                                                                 3 Made available at publication time.
+
+                                                                                          1754
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                            International Journal of Forecasting 37 (2021) 1748–1764
+
+
+Table 1                                                                           (2) DSSM (Rangapuram et al., 2018), and (3) the Trans-
+Information on dataset and optimal TFT configuration.                             former-based architecture of Li et al. (2019) with local
+                              Electricity   Traffic   Retail   Vol.               convolutional processing – which refer to as ConvTrans.
+ Dataset details                                                                  For more complex datasets, we focus on the ConvTrans
+ Target type                  R             [0, 1]    R        R                  model given its strong outperformance over other it-
+ Number of entities           370           440       130k     41
+ Number of samples            500k          500k      500k     ∼100k              erative models in prior work, and DeepAR due to its
+                                                                                  popularity among practitioners. As models in this cat-
+ Network parameters
+ k                            168           168       90       252
+                                                                                  egory require knowledge of all inputs in the future to
+ τmax                         24            24        30       5                  generate predictions, we accommodate this for complex
+ Dropout rate                 0.1           0.3       0.1      0.3                datasets by imputing unknown inputs with their last
+ State size                   160           320       240      160                available value.
+ Number of heads              4             4         4        1
+                                                                                     For simpler univariate datasets, we note that the re-
+ Training parameters                                                              sults for ARIMA, ETS, TRMF, DeepAR, DSSM, and Con-
+ Minibatch size               64            128       128      64
+                                                                                  vTrans have been reproduced from (Li et al., 2019) in
+ Learning rate                0.001         0.001     0.001    0.01
+ Max gradient norm            0.01          100       100      0.01               Table 2 for consistency.
+
+                                                                                  6.5. Results and discussion
+
+for extensive computing resources. For instance, using                                Table 2 shows that TFT significantly outperforms all
+a NVIDIA Tesla V100 GPU, our optimal TFT model (for                               benchmarks over the variety of datasets described in
+the Electricity dataset) takes just slightly over 6 h to                          Section 6.1 – demonstrating the benefits of explicitly
+train (each epoch being roughly 52 mins). The batched                             aligning the architecture with the general multi-horizon
+inference on the entire validation dataset (consisting of                         forecasting problem. This applies to both point forecasts
+50,000 samples) takes 8 min. TFT training and inference                           and uncertainty estimates, with TFT yielding 7% lower
+times can be further reduced with hardware-specific op-                           P50 and 9% lower P90 losses on average respectively
+timizations.                                                                      compared to the next best model. We also test for the sta-
+                                                                                  tistical significance of TFT improvements in Appendix C,
+6.4. Benchmarks                                                                   which shows that TFT losses are significantly lower than
+                                                                                  the next best benchmark with 95% confidence. In addition,
+                                                                                  a more qualitative evaluation of TFT credible intervals is
+    We extensively compare TFT to a wide range of mod-
+                                                                                  also provided in Appendix E for reference.
+els for multi-horizon forecasting, based on the categories
+                                                                                      Comparing direct and iterative models, we observe
+described in Section 2. Hyperparameter optimization is
+                                                                                  the importance of accounting for the observed inputs
+conducted using random search over a pre-defined search
+                                                                                  – noting the poorer results of ConvTrans on complex
+space, using the same number of iterations across all
+                                                                                  datasets where observed input imputation is required
+benchmarks for a given dataset. Additional details are
+                                                                                  (i.e. Volatility and Retail). Furthermore, the benefits of
+included in Appendix A.
+                                                                                  quantile regression are also observed when targets are
+    Direct methods: As TFT falls within this class of multi-
+                                                                                  not captured well by Gaussian distributions with direct
+horizon models, we primarily focus comparisons on deep
+                                                                                  models outperforming in those scenarios. This can be
+learning models which directly generate prediction at fu-                         seen, for example, from the Traffic dataset where target
+ture horizons, including: (1) simple sequence-to-sequence                         distribution is significantly skewed – with more than 90%
+models with global contexts (Seq2Seq), and (2) the Multi-                         of occupancy rates falling between 0 and 0.1, and the
+horizon Quantile Recurrent Forecaster (MQRNN) (Wen                                remainder distributed evenly until 1.0.
+et al., 2017). In addition, we include two simple direct
+benchmarks to evaluate the benefits of deep learning                              6.6. Ablation analysis
+models: (1) multi-layer perceptron (MLP), and (2) lin-
+ear quantile regression with L2 regularisation (Ridge).                              To quantify the benefits of each of our proposed archi-
+For the MLP, we use a single two-layered neural net-                              tectural contribution, we perform an extensive ablation
+work which takes all available information per time step                          analysis – removing each component from the network
+(i.e. {yt −k:t , z t −k:t , xt −k:t +τ , s}), and predicts all quantiles          as below, and quantifying the percentage increase in loss
+across the forecast horizon (i.e. ŷ(q, t , τ ) ∀q ∈ {0.1, 0.5,                   versus the original architecture:
+0.9} and τ ∈ {1, . . . , τmax }). For Ridge, we use a separate                    • Gating layers: We ablate by replacing each GLU layer
+set of linear coefficients for each horizon/quantile output,                        (Eq. (5)) with a simple linear layer followed by ELU.
+feeding in the same inputs as the MLP. Given the size of                          • Static covariate encoders: We ablate by setting all
+our datasets, we also train Ridge using stochastic gradient                         context vectors to zero – i.e. c s =c e =c c =c h =0 – and
+descent.                                                                            concatenating all transformed static inputs to all time-
+    Iterative methods: To position with respect to the                              dependent past and future inputs.
+rich body of work on iterative models, we evaluate TFT                            • Instance-wise variable selection networks: We ablate
+using the same setup as (Salinas et al., 2019) for the                              by replacing the softmax outputs of Eq. (6) with train-
+Electricity and Traffic datasets. This extends the results                          able coefficients, and removing the networks
+from (Li et al., 2019) for (1) DeepAR (Salinas et al., 2019),                       generating the variable selection weights. We retain,
+                                                                           1755
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                              International Journal of Forecasting 37 (2021) 1748–1764
+
+
+                Table 2
+                P50 and P90 quantile losses on a range of real-world datasets. Percentages in brackets reflect the increase in quantile
+                loss versus TFT (lower q-Risk better), with TFT outperforming competing methods across all experiments, improving
+                on the next best alternative method (underlined) between 3% and 26%.
+                  (a) P50 and P90 Losses on simpler univariate datasets.
+                                       P50                                                   P90
+                                       Electricity               Traffic                     Electricity               Traffic
+                  ARIMA                0.154 (+180% )            0.223 (+135% )              0.102 (+278% )            0.137 (+94% )
+                  ETS                  0.102 (+85% )             0.236 (+148% )              0.077 (+185% )            0.148 (+110% )
+                  TRMF                 0.084 (+53% )             0.186 (+96% )               –                         –
+                  DeepAR               0.075 (+36% )             0.161 (+69% )               0.040 (+48% )             0.099 (+40% )
+                  DSSM                 0.083 (+51% )             0.167 (+76% )               0.056 (+107% )            0.113 (+60% )
+                  ConvTrans            0.059 (+7% )              0.122 (+28% )               0.034 (+26% )             0.081 (+15% )
+                  Ridge                0.064 (+17% )             0.135 (+42% )               0.036 (+35% )             0.099 (+41% )
+                  MLP                  0.062 (+13% )             0.122 (+28% )               0.035 (+30% )             0.087 (+24% )
+                  Seq2Seq              0.067 (+22% )             0.105 (+11% )               0.036 (+33% )             0.075 (+6% )
+                  MQRNN                0.077 (+40% )             0.117 (+23% )               0.036 (+33% )             0.082 (+16% )
+                  TFT                  0.055*                    0.095*                      0.027*                    0.070*
+                  (b) P50 and P90 Losses on datasets with rich static or observed inputs.
+                                       P50                                                   P90
+                                       Volatility                Favorita                    Volatility                Favorita
+                  DeepAR               0.050 (+28% )             0.574 (+62% )               0.024 (+21% )             0.230 (+56% )
+                  ConvTrans            0.047 (+20% )             0.429 (+21% )               0.024 (+22% )             0.192 (+30% )
+                  Ridge                0.051 (+29% )             0.720 (+104% )              0.028 (+41% )             0.163 (+10% )
+                  MLP                  0.049 (+25% )             0.532 (+50% )               0.026 (+33% )             0.199 (+35% )
+                  Seq2Seq              0.042 (+7% )              0.411 (+16% )               0.021 (+8% )              0.157 (+7% )
+                  MQRNN                0.042 (+7% )              0.379 (+7% )                0.021 (+9% )              0.152 (+3% )
+                  TFT                  0.039*                    0.354*                      0.020*                    0.147*
+
+
+
+
+   however, the variable-wise GRNs (see Eq. (7)), main-                            also shows that the hour-of-day has the largest variable
+   taining a similar amount of non-linear processing.                              importance score across all temporal inputs, exceeding
+• Self-attention layers: We ablate by replacing the at-                            even the target (i.e. Power Usage) itself. In contrast to
+   tention matrix of the interpretable multi-head attention                        other datasets where past target observations are more
+   layer (Eq. (14)) with a matrix of trainable parameters                          significant (e.g. Traffic), direct attention to previous days
+   W A – i.e. Ã(Q , K ) = W A , where W A ∈ RN ×N . This                          seems to help to learn daily seasonal patterns in Electric-
+   prevents TFT from attending to different input features                         ity – with local processing between adjacent time steps
+   at different times, helping evaluation of the importance                        being less necessary. We can account for this by treating
+   of instance-wise attention weights.                                             the sequence-to-sequence architecture in the temporal
+• Sequence-to-sequence layers for local processing: We                             fusion decoder as a hyperparameter to tune, including an
+   ablate by replacing the sequence-to-sequence layer of
+                                                                                   option for simple positional encoding without any local
+   Section 4.5.1 with standard positional encoding used
+                                                                                   processing.
+   in Vaswani et al. (2017).
+                                                                                       Static covariate encoders and instance-wise variable
+    Ablated networks are trained across for each dataset
+using the hyperparameters of Table 1. Fig. 3 shows that                            selection have the next largest impact – increasing P90
+the effects on both P50 and P90 losses are similar across                          losses by more than 2.6% and 4.1% on average. The biggest
+all datasets, with all components contributing to perfor-                          benefits of these are observed for the electricity dataset,
+mance improvements on the whole.                                                   where some of the input features get very low impor-
+    In general, the components responsible for captur-                             tance.
+ing temporal relationships, local processing, and self-                                Finally, gating layer ablation also shows increases in
+attention layers, have the largest impact on performance,                          P90 losses, with a 1.9% increase on average. This is the
+with P90 loss increases of > 6% on average and > 20%                               most significant on the volatility (with a 4.1% P90 loss
+on select datasets when ablated. The diversity across time                         increase), underlying the benefit of component gating for
+series datasets can also be seen from the differences in the                       smaller and noisier datasets.
+ablation impact of the respective temporal components.
+Concretely, while local processing is critical in Traffic,
+                                                                                   7. Interpretability use cases
+Retail and Volatility, lower post-ablation P50 losses indi-
+cate that it can be detrimental in Electricity – with the
+self-attention layer playing a more vital role. A possible                            Having established the performance benefits of our
+explanation is that persistent daily seasonality appears                           model, we next demonstrate how our model design al-
+to dominate other temporal relationships in the Elec-                              lows for analysis of its individual components to interpret
+tricity dataset. For this dataset, Table D.6 of Appendix D                         the general relationships it has learned. We demonstrate
+                                                                            1756
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                           International Journal of Forecasting 37 (2021) 1748–1764
+
+
+
+
+Fig. 3. Results of ablation analysis. Both a) and b) show the impact of ablation on the P50 and P90 losses respectively. Results per dataset shown
+on the left, and the range across datasets shown on the right. While the precise importance of each is dataset-specific, all components contribute
+significantly on the whole – with the maximum percentage increase over all datasets ranging from 3.6% to 23.4% for P50 losses, and similarly from
+4.1% to 28.4% for P90 losses.
+
+
+
+
+three interpretability use cases: (1) examining the im-                      adopted to study the length of time required for an in-
+portance of each input variable in prediction, (2) visu-                     tervention to take effect (Du, Song, Han, & Hong, 2018) –
+alizing persistent temporal patterns, and (3) identifying                    such as the impact of a government’s increase in public
+any regimes or events that lead to significant changes                       expenditure on the resultant growth in Gross National
+in temporal dynamics. In contrast to other examples of                       Product (Baltagi, 2008). Seasonality models are also com-
+attention-based interpretability (Alaa & van der Schaar,                     monly used in econometrics to identify periodic patterns
+2019; Li et al., 2019; Song et al., 2018) which zoom in on                   in a target-of-interest (Hylleberg, 1992) and measure the
+interesting but instance-specific examples, our methods                      length of each cycle. From a practical standpoint, model
+focus on ways to aggregate the patterns across the entire                    builders can use these insights to further improve the
+dataset – extracting generalizable insights about temporal                   forecasting model – for instance by increasing the recep-
+dynamics.                                                                    tive field to incorporate more history if attention peaks
+                                                                             are observed at the start of the lookback window, or
+7.1. Analyzing variable importance                                           by engineering features to directly incorporate seasonal
+                                                                             effects. As such, using the attention weights present in
+    We first quantify variable importance by analyzing the                   the self-attention layer of the temporal fusion decoder, we
+variable selection weights described in Section 4.2. Con-                    present a method to identify similar persistent patterns –
+cretely, we aggregate selection weights (i.e. vχ(j)t in Eq. (8))             by measuring the contributions of features at fixed lags
+for each variable across our entire test set, recording the                  in the past on forecasts at various horizons. Combining
+10th, 50th and 90th percentiles of each sampling distribu-                   Eq. (14) and (19), we see that the self-attention layer
+tion. As the Retail dataset contains the full set of available               contains a matrix of attention weights at each forecast
+input types (i.e. static metadata, known inputs, observed                    time t – i.e. Ã(φ(t), φ(t)). Multi-head attention outputs at
+inputs, and the target), we present the results for its                      each forecast horizon τ (i.e. β(t , τ )) can then be described
+variable importance analysis in Table 3. We also note sim-                   as an attention-weighted sum of lower level features at
+ilar findings in other datasets, which are documented in                     each position n:
+Appendix D.1 for completeness. On the whole, the results                                   τmax
+                                                                                           ∑
+show that the TFT extracts only a subset of key inputs                       β(t , τ ) =          α (t , n, τ ) θ̃ (t , n),                    (27)
+that intuitively play a significant role in predictions. The                               n=−k
+analysis of persistent temporal patterns is often key to
+understanding the time-dependent relationships present                       where α (t , n, τ ) is the (τ , n)-th element of Ã(φ(t), φ(t)),
+in a given dataset. For instance, lag models are frequently                  and θ̃ (t , n) is a row of Θ̃(t) = Θ(t)W V . Due to decoder
+                                                                      1757
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                                     International Journal of Forecasting 37 (2021) 1748–1764
+
+
+Table 3                                                                             spikes at daily intervals observed for Electricity and Traf-
+Variable importance for the Retail dataset. The 10th, 50th and 90th                 fic, and slightly weaker weekly patterns for Retail. For
+percentiles of the variable selection weights are shown, with values
+larger than 0.1 indicated by *. For static covariates, the largest weights
+                                                                                    Retail, we also observe the decaying trend pattern, with
+are attributed to variables that uniquely identify different entities               the last few days dominating the importance.
+(i.e. item number and store number). For past inputs, past values                       No strong persistent patterns were observed for the
+of the target (i.e. log sales) are critical as expected, as forecasts               Volatility – attention weights equally distributed across
+are extrapolations of past observations. For future inputs, promotion
+                                                                                    all positions on average. This resembles a moving average
+periods and national holidays have the greatest influence on sales
+forecasts, in line with periods of increased customer spending.                     filter at the feature level, and – given the high degree of
+                                 10%          50%             90%                   randomness associated with the volatility process – could
+ (a) Static covariates
+                                                                                    be useful in extracting the trend over the entire period by
+                                                                                    smoothing out high-frequency noise.
+ Item num                        0.198*       0.230*          0.251*
+ Store num                       0.152*       0.161*          0.170*
+                                                                                        TFT learns these persistent temporal patterns from the
+ City                            0.094        0.100           0.124                 raw training data without any human hard-coding. Such
+ State                           0.049        0.060           0.083                 capability is expected to be very useful in building trust
+ Type                            0.005        0.006           0.008                 with human experts via sanity-checking. Model devel-
+ Cluster                         0.108*       0.122*          0.133*
+                                                                                    opers can also use these towards model improvements,
+ Family                          0.063        0.075           0.079
+ Class                           0.148*       0.156*          0.163*                e.g. via specific feature engineering or data collection.
+ Perishable                      0.084        0.085           0.088
+ (b) Past inputs                                                                    7.3. Identifying regimes & significant events
+ Transactions                    0.029        0.033           0.037
+ Oil                             0.062        0.081           0.105                     Identifying sudden changes in temporal patterns can
+ On-promotion                    0.072        0.075           0.078                 also be very useful, as temporary shifts can occur due to
+ Day of week                     0.007        0.007           0.008                 the presence of significant regimes or events. For instance,
+ Day of month                    0.083        0.089           0.096
+ Month                           0.109*       0.122*          0.136*
+                                                                                    regime-switching behavior has been widely documented
+ National hol                    0.131*       0.138*          0.145*                in financial markets (Ang & Timmermann, 2012), with re-
+ Regional hol                    0.011        0.014           0.018                 turns characteristics – such as volatility – being observed
+ Local hol                       0.056        0.068           0.072                 to change abruptly between regimes. As such, identifying
+ Open                            0.027        0.044           0.067
+                                                                                    such regime changes provides strong insights into the
+ Log sales                       0.304*       0.324*          0.353*
+                                                                                    underlying problem which is useful for the identification
+ (c) Future inputs
+                                                                                    of the significant events.
+ On-promotion                    0.155*       0.170*          0.182*
+                                                                                        Firstly, for a given entity, we define the average atten-
+ Day of week                     0.029        0.065           0.089
+ Day of month                    0.056*       0.116*          0.138*                tion pattern per forecast horizon as:
+ Month                           0.111*       0.155*          0.240*                               T
+ National hol                    0.145*       0.220*          0.242*
+                                                                                                   ∑
+ Regional hol                    0.012        0.014           0.060
+                                                                                    ᾱ (n, τ ) =           α (t , j, τ )/T ,                             (28)
+ Local hol                       0.116*       0.151*          0.239*                                t =1
+ Open                            0.088        0.095           0.097
+                                                                                    and then construct ᾱ(τ ) = [ᾱ (−k, τ ), . . . , ᾱ (τmax , τ )]T .
+                                                                                    To compare similarities between attention weight vec-
+                                                                                    tors, we use the distance metric proposed by Comaniciu,
+masking, we also note that α (t , i, j) = 0, ∀i > j. For                            Ramesh, and Meer (2003):
+each forecast horizon τ , the importance of a previous                                             √
+time point n < τ can hence be determined by analyzing                               κ (p, q) =        1 − ρ (p, q),                                      (29)
+distributions of α (t , n, τ ) across all time steps and entities.
+                                                                                                                    ∑√
+                                                                                    where ρ (p, q) =        j  pj qj is the Bhattacharya coef-
+                                                                                    ficient (Kailath, 1967) measuring the overlap between
+7.2. Visualizing persistent temporal patterns                                       discrete distributions – with pj , qj being elements of prob-
+                                                                                    ability vectors p, q respectively. For each entity, signifi-
+    Attention weight patterns can be used to shed light on                          cant shifts in temporal dynamics are then measured us-
+the most important past time steps that the TFT model                               ing the distance between attention vectors at each point
+bases its decisions on. In contrast to other traditional                            with the average pattern, aggregated for all horizons as
+and machine learning time series methods, which rely on                             below:
+model-based specifications for seasonality and lag anal-                                           τmax
+ysis, the TFT can learn such patterns from raw training
+                                                                                                   ∑
+                                                                                                        κ ᾱ(τ ), α(t , τ ) /τmax ,
+                                                                                                         (                 )
+                                                                                    dist(t) =                                                            (30)
+data.
+                                                                                                   τ =1
+    Fig. 4 shows the attention weight patterns across all
+our test datasets – with the upper graph plotting the                               where α(t , τ ) = [α (t , −k, τ ), . . . , α (t , τmax , τ )]T .
+mean along with the 10th, 50th and 90th percentiles                                    Using the volatility dataset, we attempt to analyze
+of the attention weights for one-step-ahead forecasts                               regimes by applying our distance metric to the attention
+(i.e. α (t , 1, τ )) over the test set, and the bottom graph                        patterns for the S&P 500 index over our training period
+plotting the average attention weights for various hori-                            (2001 to 2015). Plotting dist(t) against the target (i.e. log
+zons (i.e. τ ∈ {5, 10, 15, 20}). We observe that the three                          realized volatility) in the bottom chart of Fig. 5, significant
+datasets exhibit a seasonal pattern, with clear attention                           deviations in attention patterns can be observed around
+                                                                             1758
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                              International Journal of Forecasting 37 (2021) 1748–1764
+
+
+
+
+Fig. 4. Persistent temporal patterns across datasets. Clear seasonality observed for the Electricity, Traffic and Retail datasets, but no strong persistent
+patterns seen in Volatility dataset. Upper plot – percentiles of attention weights for one-step-ahead forecast. Lower plot – average attention weights
+for forecast at various horizons.
+
+
+
+periods of high volatility (e.g. the 2008 financial crisis) –                    sequence-to-sequence and attention-based temporal pro-
+corresponding to the peaks observed in dist(t). From the                         cessing components that capture time-varying relation-
+plots, we can see that TFT appears to alter its behavior                         ships at different timescales, (2) static covariate encoders
+between regimes – placing equal attention across past in-                        that allow the network to condition temporal forecasts on
+puts when volatility is low, while attending more to sharp                       static metadata, (3) gating components that enable skip-
+trend changes during high volatility periods – suggesting                        ping over unnecessary parts of the network, (4) variable
+                                                                                 selection to pick relevant input features at each time step,
+differences in temporal dynamics learned in each of these
+                                                                                 and (5) quantile predictions to obtain output intervals
+cases.
+                                                                                 across all prediction horizons. On a wide range of real-
+                                                                                 world tasks – on both simple datasets that contain only
+8. Conclusions                                                                   known inputs and complex datasets which encompass the
+                                                                                 full range of possible inputs – we show that TFT achieves
+                                                                                 state-of-the-art forecasting performance. Lastly, we inves-
+   We introduce TFT, a novel attention-based deep learn-                         tigate the general relationships learned by TFT through
+ing model for interpretable high-performance multi-                              a series of interpretability use cases – proposing novel
+horizon forecasting. To handle static covariates, a priori                       methods to use TFT to (i) analyze important variables
+known inputs, and observed inputs effectively across a                           for a given prediction problem, (ii) visualize persistent
+wide range of multi-horizon forecasting datasets, TFT uses                       temporal relationships learned (e.g. seasonality), and (iii)
+specialized components. Specifically, these include: (1)                         identify significant regime changes.
+                                                                          1759
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                             International Journal of Forecasting 37 (2021) 1748–1764
+
+
+
+
+Fig. 5. Regime identification for S&P 500 realized volatility. Significant deviations in attention patterns can be observed around periods of high
+volatility – corresponding to the peaks observed in dist(t). We use a threshold of dist(t) > 0.3 to denote significant regimes, as highlighted in
+purple. Focusing on periods around the 2008 financial crisis, the top right plot visualizes α (t , n, 1) midway through the significant regime, compared
+to the normal regime on the top left. (For interpretation of the references to colour in this figure legend, the reader is referred to the web version
+of this article.)
+
+
+Declaration of competing interest                                               with previous work, we consider the electricity usage,
+                                                                                day-of-week, hour-of-day, and a time index – i.e. the
+    One or more of the authors of this paper have dis-                          number of time steps from the first observation – as
+closed potential or pertinent conflicts of interest, which                      real-valued inputs, and treat the entity identifier as a
+may include receipt of payment, either direct or indi-                          categorical variable.
+rect, institutional support, or association with an en-                             Traffic: Tests on the Traffic dataset are also kept con-
+tity in the biomedical field which may be perceived to                          sistent with previous work, using 500k training samples
+have potential conflict of interest with this work. For full                    taken before 2008-06-15 as per (Salinas et al., 2019), and
+disclosure statements refer to https://doi.org/10.1016/j.                       split in the same way as the Electricity dataset. For testing,
+ijforecast.2021.03.012.: The work for this paper is funded                      we use the 7 days immediately following the training set,
+by Google.                                                                      and z-score normalization was applied across all entities.
+                                                                                For inputs, we also take traffic occupancy, day-of-week,
+Acknowledgments                                                                 hour-of-day, and a time index as real-valued inputs, and
+                                                                                the entity identifier as a categorical variable.
+   The authors gratefully acknowledge discussions with                              Retail: We treat each product number-store number
+Yaguang Li, Maggie Wang, Jeffrey Gu, Minho Jin, and An-                         pair as a separate entity, with over 135k entities in to-
+drew Moore that contributed to the development of this                          tal. The training set is made up of 450k samples taken
+paper.                                                                          between 2015-01-01 to 2015-12-01, a validation set of
+                                                                                50k samples from the 30 days after the training set, and
+Appendix A. Feature transformations and training de-                            a test set of all entities over the 30-day horizon following
+tails                                                                           the validation set. We use all inputs from the Kaggle
+                                                                                competition. Data is resampled at regular daily intervals,
+    We provide all the sufficient information on feature                        imputing any missing days using the last available ob-
+pre-processing and train/test splits to ensure the repro-                       servation. We include an additional ‘open’ flag to denote
+ducibility of our results.                                                      whether data is present on a given day. We group na-
+    Electricity: Per (Salinas et al., 2019), we use 500k sam-                   tional, regional, and local holidays into separate variables.
+ples taken between 2014-01-01 to 2014-09-01 – using the                         We apply a log-transform on the sales data, and adopt
+first 90% for training, and the last 10% as a validation set.                   z-score normalization across all entities. We consider log
+Testing is done over the 7 days immediately following                           sales, transactions, oil to be real-valued and the rest to be
+the training set – as described in Salinas et al. (2019),                       categorical.
+Yu et al. (2016). Given the large differences in magnitude                          Volatility: We use the data from 2000-01-03 to 2019-
+between trajectories, we also apply z-score normalization                       06-28 – with the training set consisting of data before
+separately to each entity for real-valued inputs. In line                       2016, the validation set from 2016–2017, and the test
+                                                                         1760
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                             International Journal of Forecasting 37 (2021) 1748–1764
+
+
+            Table B.4
+            Summary statistics of dataset target.
+                                             Electricity              Traffic                        Volatility                   Favorita
+             Num. of entities                369                      963                            31                           143,645
+             Min                             0                        0                              −21.38                       −6.91
+             Max                             168,100                  1                              −3.53                        10.70
+             Average                         617                      0.053                          −9.71                        1.46
+             Standard dev.                   3,633                    0.046                          1.04                         1.09
+             Sampling frequency              Hourly                   Hourly                         Daily                        Daily
+             Target name                     Power usage              Traffic occupancy              Log realised vol.            Log sales
+
+
+
+
+Fig. B.6. Range of ACF values for target variable by dataset. Clear seasonal patterns observed on average for Electricity and Traffic, with strong
+positive correlations at 24 h intervals and slight negative correlations at 12-h intervals. Mild weekly seasonality also observed for Retail, with slight
+ACF increases at 7-day intervals. The gradual decay of Volatility ACF values indicate persistence in target values – with targets being similar (high
+ACF) to values in its distant past (>40 business days).
+
+
+set data from 2018 onwards. For the target, we focus                            standard autocorrelation functions (ACFs) are computed
+on 5-min sub-sampled realized volatility (i.e. the rv5_ss                       on a univariate variable for a single entity, we compute
+column), and add daily open-to-close returns as an extra                        ACFs separately for each entity – presenting the 95th,
+exogenous input. Additional variables are included for the                      50th, and 5th percentiles across all entities for each lag.
+day-of-week, day-of-month, week-of-year, and month –                            From the ranges in Fig. B.6, we can see that the ACF values
+along with a ‘region’ variable for each index (i.e. Americas,                   agree well with the interpretability results of Section 7.2
+Europe, or Asia). Finally, a time index is added to denote                      – i.e. seasonal patterns in Electricity, Traffic, and Retail,
+the number of days from the first day in the training set.
+                                                                                no distinct lags in Volatility – indicating that the TFT
+We treat all date-related variables (i.e. day-of-week, day-
+                                                                                is faithfully learning significant temporal patterns in the
+of-month, week-of-year, and month) and the region as
+                                                                                dataset.
+categorical inputs. A log transformation is applied to the
+target, and all inputs are z-score normalized across all
+entities.                                                                       Appendix C. Significance testing of TFT P50 and P90
+                                                                                results
+Appendix B.          Exploratory analysis of targets across
+datasets
+                                                                                   To evaluate the statistical significance of the results,
+   Given the importance of target variables in multi-                           we conduct one-tailed hypothesis tests on the TFT P50
+horizon forecasting problems, we perform an exploratory                         and P90 losses, under the null hypothesis that the TFT
+data analysis on the targets across datasets – presenting                       losses are not less than the next best benchmark. We
+summary statistics in Table B.4. We also perform an                             compute a 95% confidence interval for the TFT losses via
+autocorrelation analysis on the target variable to build                        bootstrap resampling, which we compare against point
+some intuition around temporal dynamics, which high-                            estimates reported for the next best model. Bootstrap
+lights any significant lags present in each dataset. As                         distributions are generated using the methodology below:
+                                                                         1761
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                                 International Journal of Forecasting 37 (2021) 1748–1764
+
+
+Table C.5                                                                       Table D.6
+Significance testing results for TFT P50 and P90 quantile losses vs.            Variable importance scores for the Electricity, Traffic and Volatility
+next best model. 95% percentile thresholds for TFT losses are computed          datasets. The most significant variable of each input category is in-
+using bootstrap resampling, which we compare against the next best              dicated by *. As before, past values of the target play a significant role
+model’s loss. Across all datasets, losses for the next best model are           – being the top 1 or 2 most significant past input across datasets. The
+higher than their respective thresholds, allowing us to conclude that           role of seasonality can also be seen in Electricity and Traffic, where the
+the TFT losses are lower than competing benchmarks in a statistically           past and future values of the hour-of-day is important for forecasts.
+significant way.                                                                                                 10%            50%            90%
+                            Electricity   Traffic   Vol.      Retail             (a) Electricity
+ (a) P50 losses                                                                  Static
+ TFT loss                   0.0550        0.0950    0.0394    0.3536             ID                              1.000*         1.000*         1.000*
+ 95% threshold              0.0559        0.0956    0.0399    0.3550             Past
+ Next best loss             0.0590        0.1050    0.0420    0.3789             Hour of day                     0.437*         0.462*         0.473*
+ Next best model            ConvTrans     Seq2Seq   Seq2Seq   MQRNN              Day of week                     0.078          0.099          0.151
+ TFT % improvement          7.3%          10.5%     6.7%      7.2%               Time index                      0.066          0.077          0.092
+ (b) P90 losses                                                                  Power usage                     0.342          0.359          0.366
+ TFT loss                   0.0270        0.0705    0.0197    0.1471             Future
+ 95% threshold              0.0278        0.0713    0.0201    0.1477             Hour of day                     0.718*         0.738*         0.739*
+ Next best loss             0.0340        0.0745    0.0213    0.1519             Day of week                     0.109          0.124          0.166
+ Next best model            ConvTrans     Seq2Seq   Seq2Seq   MQRNN              Time index                      0.114          0.137          0.155
+ TFT % improvement          25.9%         5.4%      7.8%      3.1%               (b) Traffic
+                                                                                 Static
+                                                                                 ID                              1.000*         1.000*         1.000*
+    1. TFT 0.5 (or 0.9) quantile forecasts are obtained for                      Past
+       all entities, time steps and forecast horizons, and                       Hour of day                     0.285          0.296          0.300
+                                                                                 Day of week                     0.117          0.122          0.124
+       paired with respective targets.
+                                                                                 Time index                      0.107          0.109          0.111
+    2. For each bootstrap sample, we (a) randomly draw                           Occupancy                       0.471*         0.473*         0.483*
+       forecast-target pairs (across entities, time and fore-                    Future
+       cast horizon) with replacement until our sample                           Hour of day                     0.781*         0.781*         0.781*
+       size matches the size of the original dataset, and (b)                    Day of week                     0.099          0.100          0.102
+       compute a single P50 (or P90) loss per Eq. (26).                          Time index                      0.117          0.119          0.121
+    3. We repeat the bootstrap step 1000 times, creating                         (c) Volatility
+       a sampling distribution of P50 (or P90) losses.                           Static
+                                                                                 Region                          1.000*         1.000*         1.000*
+   We note that this methodology also allows us to eval-
+                                                                                 Past
+uate significance against published results, where we do                         Time index                      0.093          0.098          0.142
+not have access to confidence intervals around losses.                           Day of week                     0.003          0.004          0.004
+From the results in Table C.5, we can see that the losses for                    Day of month                    0.017          0.027          0.028
+the next best model fall outside the confidence interval,                        Week of year                    0.022          0.057          0.068
+indicating that P50 and P90 losses are significantly lower                       Month                           0.008          0.009          0.011
+                                                                                 Open-to-close returns           0.078          0.158          0.178
+for the TFT.                                                                     Realised vol                    0.620*         0.647*         0.714*
+                                                                                 Future
+Appendix D. Interpretability results
+                                                                                 Time index                      0.011          0.014          0.024
+                                                                                 Day of week                     0.019          0.072          0.299
+   Apart from Section 7, which highlights our most promi-                        Day of month                    0.069*         0.635*         0.913
+nent findings, we present the remaining results here for                         Week of year                    0.026          0.060          0.227
+completeness.                                                                    Month                           0.008          0.055          0.713
+
+
+D.1. Variable importance
+                                                                                Appendix E.            Analysis of quantile forecasts under
+    Table D.6 shows the variable importance scores for
+                                                                                regime shifts
+the remaining Electricity, Traffic and Volatility datasets.
+As these datasets only have one static input, the network
+allocates full weight to the entity identifier for Electricity                      As noted in Section 7.3, abrupt changes in temporal
+and Traffic, along with the region input for Volatility.                        dynamics can occur in the presence of regime shifts or sig-
+We also observe two types of important time-dependent                           nificant events – which may rarely occur and are difficult
+inputs – those related to past values of the target as                          to define or detect beforehand. While the improvements
+before, and those related to calendar effects. For instance,                    in high quantile (e.g. P90) losses do demonstrate that TFT
+the hour-of-day plays a significant role for Electricity and                    uncertainty estimates are well-calibrated across regimes,
+Traffic datasets, echoing the daily seasonality observed                        it can be useful to analyze the behavior of TFT uncertainty
+in the next section. In the Volatility dataset, the day-                        estimates following sudden regime shifts.
+of-month is observed to play a significant role in future                           As such, we perform a qualitative examination of TFT
+inputs – potentially reflecting turn-of-month effects (Gio-                     credible intervals before and after a sudden regime shift.
+vanis, 2014).                                                                   We focus on the Volatility dataset around March 2020,
+                                                                         1762
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                            International Journal of Forecasting 37 (2021) 1748–1764
+
+
+
+
+Fig. E.7. TFT one-step-ahead forecasts for realized volatility across major stock indices following the incidence of COVID-19. From the target values
+in purple, we note the regime shift following the sharp increase in index volatilities in March 2020, which later decay to elevated baseline levels
+over 2020. While volatilities in March 2020 do appear at or around the 0.975 quantile forecast, the TFT maintains reasonable uncertainty estimates
+over the regime shift – with most values lying within the 95% credible interval – demonstrating its ability to adapt to changing temporal dynamics.
+(For interpretation of the references to colour in this figure legend, the reader is referred to the web version of this article.)
+
+
+where abrupt changes in market conditions were reported                        References
+in response to the incidence of COVID-19 (Baker, Bloom,
+Davis, Kost, Sammon, & Viratyosin, 2020; Cox, Greenwald,                       Alaa, A., & van der Schaar, M. (2019). Attentive state-space modeling
+                                                                                   of disease progression. In NIPS.
+& Ludvigson, 2020) – leading to a sharp increase in the                        Ang, A., & Timmermann, A. (2012). Regime changes and financial
+volatility of global stock indices. To obtain a 95% credible                       markets. Annual Review of Financial Economics, 4(1), 313–337.
+interval, we re-train our TFT to output 0.975 and 0.025                        Arik, S. O., & Pfister, T. (2019). TabNet: Attentive interpretable tabular
+quantile forecasts on top of mean estimates, applying the                          learning. arXiv:1908.07442.
+                                                                               Baker, S. R., Bloom, N., Davis, S. J., Kost, K. J., Sammon, M. C., &
+TFT to an extended out-of-sample period to incorporate                             Viratyosin, T. (2020). The unprecedented stock market impact of
+the impact of COVID-19. Focusing on one-step-ahead fore-                           COVID-19: Working paper series 26945, National Bureau of Economic
+casts for 3 major stock indices (S&P 500, FTSE 100, Nikkei                         Research.
+                                                                               Baltagi, B. (2008). Distributed lags and dynamic models. In Econometrics
+225) in Fig. E.7 – and noting similar observations in other
+                                                                                   (pp. 129–145).
+indices – we can see that the TFT maintains reasonable                         Böse, J.-H., et al. (2017). Probabilistic demand forecasting at scale.
+uncertainty estimates before, during, and after the COVID-                         Proceedings in VLDB Endowment, 10(12), 1694–1705.
+19 crash of March 2020. The adaptivity of the TFT to                           Capistran, C., Constandse, C., & Ramos-Francia, M. (2010). Multi-horizon
+                                                                                   inflation forecasts using disaggregated data. Economic Modelling,
+regime changes also echoes the findings of Section 7.3,
+                                                                                   27(3), 666–677.
+which shows that the TFT can dynamically modify its                            Choi, E., et al. (2016). RETAIN: An interpretable predictive model for
+attention patterns in different conditions.                                        healthcare using reverse time attention mechanism. In NIPS.
+
+                                                                        1763
+B. Lim, S.Ö. Arık, N. Loeff et al.                                                                  International Journal of Forecasting 37 (2021) 1748–1764
+
+
+Clevert, D.-A., Unterthiner, T., & Hochreiter, S. (2016). Fast and accurate          Li, S., et al. (2019). Enhancing the locality and breaking the memory
+    deep network learning by exponential linear units (ELUs). In ICLR.                    bottleneck of transformer on time series forecasting. In NeurIPS.
+Comaniciu, D., Ramesh, V., & Meer, P. (2003). Kernel-based object track-             Lim, B., Alaa, A., & van der Schaar, M. (2018). Forecasting treatment
+    ing. IEEE Transactions on Pattern Analysis and Machine Intelligence,                  responses over time using recurrent marginal structural networks.
+    25(5), 564–577.                                                                       In NeurIPS.
+Courty, P., & Li, H. (1999). Timing of seasonal sales. Journal of Business,          Lundberg, S., & Lee, S.-I. (2017). A unified approach to interpreting
+    72(4), 545–572.                                                                       model predictions. In NIPS.
+Cox, J., Greenwald, D. L., & Ludvigson, S. C. (2020). What explains the              Makridakis, S., Spiliotis, E., & Assimakopoulos, V. (2020). The M4
+    COVID-19 stock market? Working paper series 27784, National Bureau                    competition: 100,000 time series and 61 forecasting methods.
+    of Economic Research.                                                                 International Journal of Forecasting, 36(1), 54–74.
+Dauphin, Y., Fan, A., Auli, M., & Grangier, D. (2017). Language modeling             Marcellino, M., Stock, J., & Watson, M. (2006). A comparison of direct
+    with gated convolutional networks. In ICML.                                           and iterated multistep AR methods for forecasting macroeconomic
+Du, S., Song, G., Han, L., & Hong, H. (2018). Temporal causal inference                   time series. Journal of Econometrics, 135, 499–526.
+    with time lag. Neural Computation, 30(1), 271–291.                               Neil, D., et al. (2016). Phased LSTM: Accelerating recurrent network
+Fan, C., et al. (2019). Multi-horizon time series forecasting with                        training for long or event-based sequences. In NIPS.
+    temporal attention learning. In KDD.                                             Rangapuram, S. S., et al. (2018). Deep state space models for time series
+Favorita, C. (2018). Corporacion favorita grocery sales forecasting                       forecasting. In NIPS.
+    competition. URL https://www.kaggle.com/c/favorita-grocery-sales-                Ribeiro, M., et al. (2016). ‘‘Why should I trust you?’’ Explaining the
+    forecasting/.                                                                         Predictions of any classifier. In KDD.
+Gal, Y., & Ghahramani, Z. (2016). A theoretically grounded application               Salinas, D., Flunkert, V., Gasthaus, J., & Januschowski, T. (2019). DeepAR:
+    of dropout in recurrent neural networks. In NIPS.                                     Probabilistic forecasting with autoregressive recurrent networks.
+Giovanis, E. (2014). The turn-of-the-month-effect: Evidence from pe-                      International Journal of Forecasting.
+    riodic generalized autoregressive conditional heteroskedasticity                 Song, H., et al. (2018). Attend and diagnose: Clinical time series analysis
+    (PGARCH) model. International Journal of Economic Sciences and                        using attention models.
+    Applied Research, 7, 43–61.                                                      Taieb, S. B., Sorjamaa, A., & Bontempi, G. (2010). Multiple-output mod-
+Guo, T., Lin, T., & Antulov-Fantulin, N. (2019). Exploring interpretable                  eling for multi-step-ahead time series forecasting. Neurocomputing,
+    LSTM neural networks over multi-variable data. In ICML.                               73(10), 1950–1957.
+Heber, G., Lunde, A., Shephard, N., & Sheppard, K. K. (2009). Oxford-                Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.
+    man institute’s realized library. URL https://realized.oxford-man.ox.                 N., et al. (2017). Attention is all you need. In NIPS.
+    ac.uk/.                                                                          Wang, F., Jiang, M., Qian, C., Yang, S., Li, C., Zhang, H., et al. (2017).
+Hochreiter, S., & Schmidhuber, J. (1997). Long short-term memory.                         Residual attention network for image classification. In CVPR.
+    Neural Computation, 9(8), 1735–1780.                                             Wang, Y., et al. (2019). Deep factors for forecasting. In ICML.
+Hylleberg, S. (Ed.), (1992). Modelling seasonality. Oxford University                Wen, R., et al. (2017). A multi-horizon quantile recurrent forecaster. In
+    Press.                                                                                NIPS 2017 time series workshop.
+Kailath, T. (1967). The divergence and bhattacharyya distance measures               Yoon, J., Arik, S. O., & Pfister, T. (2019). RL-LIM: Reinforcement
+    in signal selection. IEEE Transactions on Communication Technology,                   learning-based locally interpretable modeling. arXiv:1909.12367.
+    15(1), 52–60.                                                                    Yu, H.-F., Rao, N., & Dhillon, I. S. (2016). Temporal regularized matrix
+Koutník, J., Greff, K., Gomez, F., & Schmidhuber, J. (2014). A clockwork                  factorization for high-dimensional time series prediction. In NIPS.
+    RNN. In ICML.                                                                    Zhang, J., & Nawata, K. (2018). Multi-step prediction for influenza
+Lei Ba, J., Kiros, J. R., & Hinton, G. E. (2016). Layer normalization.                    outbreak by an adjusted long short-term memory. Epidemiology and
+    arXiv:1607.06450.                                                                     Infection, 146(7).
+
+
+
+
+                                                                              1764
+

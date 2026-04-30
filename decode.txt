@@ -1,0 +1,1186 @@
+                                                                Journal of Financial Stability 84 (2026) 101532
+
+
+                                                                   Contents lists available at ScienceDirect
+
+
+                                                             Journal of Financial Stability
+                                                         journal homepage: www.elsevier.com/locate/jfstabil
+
+
+
+
+Decoding mutual fund performance: Dynamic return patterns via deep
+learningI
+                                   1
+Norman (Xuxi) Guo
+Richard A. Chaifetz School of Business, Saint Louis University, 3674 Lindell Blvd., St., Louis, MO 63108, USA
+
+
+
+ARTICLE                INFO                               ABSTRACT
+
+JEL classification:                                       This paper applies the Temporal Fusion Transformer (TFT) model to learn dynamic time-series patterns
+C45                                                       in mutual fund performance and to assess whether these patterns predict future alpha. I summarize the
+G11                                                       model’s cross-sectional ranking power using diagnostic portfolio spreads: a top-minus-bottom decile exhibits an
+G17
+                                                          annualized Carhart four-factor alpha spread of 2.8%, with dispersion persisting for up to four years. In panel
+G23
+                                                          regressions controlling for standard predictors and fund and time fixed effects, TFT forecasts improve explana-
+Keywords:                                                 tory power by more than 25% in adjusted 𝑅2 . Leveraging TFT’s interpretable outputs, I show that historical
+Machine learning
+                                                          fund returns receive the largest weight (about 29%), their importance displays earnings-cycle seasonality, and
+Mutual fund performance
+                                                          attention to past observations rises by 46% during crisis periods. Using fund-by-month variable-importance
+Time-series forecasting
+Model interpretability                                    weights, I define fund-specific informativeness states and construct conditional skill measures that predict and
+Performance persistence                                   persist precisely when the same signal becomes informative again, beyond coarse macro conditioning. Together,
+                                                          these results provide an alternative explanation for why unconditional performance persistence appears weak:
+                                                          skill is episodic and becomes visible when a manager’s key signals regain relevance.
+
+
+
+                                                                                               superior performance and past performance is not a dependable predic-
+                                                                                               tor of future performance (e.g., Fama and French, 2010, Barras et al.,
+       ‘‘History doesn’t repeat itself, but it often rhymes’’                                  2010). If funds deploy different, state-dependent strategies over time,
+                                                                    [—Mark Twain]              then the mapping from past outcomes to future performance can be
+                                                                                               nonlinear and regime-specific, making persistence difficult to detect
+1. Introduction                                                                                with traditional linear models.
+                                                                                                   This paper sets out to identify and learn these dynamic time-series
+    History often repeats itself, though rarely in exactly the same way.                       patterns in fund returns, assess whether they help predict future perfor-
+For example, the 2020s share notable parallels with the ‘‘roaring’’                            mance (or managerial skill), and connect the patterns to the way funds
+1920s: both periods followed a global pandemic and witnessed rapid                             respond to changing market conditions. While the classical mutual
+technological advancement, despite significant differences between the                         fund literature emphasizes cross-sectional factor models (Carhart, 1997;
+two eras.2 In the mutual fund industry, experienced managers similarly                         Fama and French, 2010) and recent machine learning work has made
+learn from recurring market and economic episodes and adjust their                             progress using fund characteristics and other cross-sectional signals
+strategies accordingly.3 This perspective offers an alternative interpre-
+                                                                                               (Kaniel et al., 2023; Li and Rossi, 2020), there remains scope to study
+tation of two well-known empirical facts: most funds do not generate
+
+
+ I This article is part of a Special issue entitled: ‘AI Technology’ published in Journal of Financial Stability.
+    E-mail address: norman.guo@slu.edu.
+   1
+    I am grateful to the editor, Fariborz Moshirian, and two anonymous reviewers for constructive comments and suggestions that substantially improved the
+paper. I have also benefited from discussions with Vikas Agarwal, Sean Cao, Will Cong, Marcin Kacperczyk, Zhen Shi, Baozhong Yang, Bing Liang, and Hong
+Zhang, and from comments by participants at the 2022 Financial Management Association Meetings, the 2022 Midwest Finance Association Meetings, the 2023
+Economics of Financial Technology Conference, the 2024 Southern Finance Association Meetings, and seminars at Georgia State University, Renmin University,
+and Saint Louis University.
+  2
+    ‘‘ ‘Roaring’? Not so fast’’, Cristina Lindblad, February 1, 2021, Bloomberg Businessweek.
+  3
+    See, for example, The Most Important Thing: Uncommon Sense for the Thoughtful Investor, 2011, Howard Marks, Columbia Business School Publishing, ‘‘Déjà
+vu all over again’’, January 10, 2019, Andrew Pastor, EdgePoint Investment Group, and ‘‘ARK Invest’s Wood expects market rotation back to growth stocks’’,
+September 14, 2021, David Randall, Reuters.
+
+https://doi.org/10.1016/j.jfs.2026.101532
+Received 2 July 2025; Received in revised form 2 March 2026; Accepted 11 March 2026
+Available online 18 March 2026
+1572-3089/© 2026 The Author. Published by Elsevier B.V. This is an open access article under the CC BY license (http://creativecommons.org/licenses/by/4.0/).
+N. Guo                                                                                                                 Journal of Financial Stability 84 (2026) 101532
+
+
+how performance evolves as strategies and information environments                  Recent studies apply non-linear methods to fund characteristics and
+change over time.                                                                   holdings to improve cross-sectional fund selection (e.g., Kaniel et al.,
+    To take this time-series perspective seriously, I employ a state-               2023; Li and Rossi, 2020). DeMiguel et al. (2023) further show that
+of-the-art sequence-to-sequence deep learning model, the Temporal                   characteristic-based machine-learning signals can translate into eco-
+Fusion Transformer (TFT). Unlike single-period forecasting, TFT pre-                nomically meaningful performance in implementable long-only portfo-
+dicts an entire sequence of future fund returns jointly, which is well              lios after accounting for key frictions.
+suited to capturing multi-horizon dynamics and recurring patterns. The                  This paper is complementary but distinct in both object and mech-
+model also integrates dynamic (e.g., macroeconomic indicators), deter-              anism. While Kaniel et al. (2023) and DeMiguel et al. (2023) primarily
+ministic (e.g., fund age), and static (e.g., fund style) inputs through             study cross-sectional fund selection using relatively static characteris-
+distinct pathways.4 Most importantly for economic interpretation, TFT               tics (and emphasize implementable long-only strategies), I focus on the
+produces exportable attention and variable-importance matrices that                 temporal structure of fund performance and use a sequence-to-sequence
+summarize (i) which past periods the model relies on for forecasting                model to learn recurring, state-dependent return patterns. This time-
+and (ii) which variables are most informative for a given fund at a given           series emphasis allows me to summarize conditional ranking power
+point in time. These intermediate outputs make it possible to move                  using diagnostic portfolio spreads and, crucially, to use attention and
+beyond ‘‘black-box’’ prediction and study when and why skill becomes                variable-importance outputs to define fund-specific informativeness
+economically relevant.                                                              states. The resulting conditional skill measures predict future perfor-
+    I first evaluate whether TFT meaningfully distinguishes funds based             mance precisely when a fund’s preferred signals regain informativeness,
+on predicted conditional performance. I summarize cross-sectional                   remain persistent for up to four years, and are not explained by coarse
+ranking ability using diagnostic portfolio spreads: a top-minus-bottom              macro conditioning alone.
+decile spread corresponds to an annualized Fama–French–Carhart four-                    Second, this paper contributes to the literature on time-varying fund
+factor alpha of 2.8%. Because shorting mutual funds is generally not                skill and conditional performance predictability.5 Prior work shows
+feasible for typical investors, I interpret this spread as a diagnostic             that fund performance and risk exposures can depend on conditioning
+summary of conditional ranking power rather than a tradable strategy.               information and evolve with the economic environment. I complement
+The dispersion in conditional performance is persistent, remaining                  these approaches by using model-implied informativeness states to
+statistically and economically significant for up to four years after port-         discipline when conditioning should matter: rather than pre-specifying
+folio formation. Consistent with this ranking evidence, TFT forecasts               a small set of instruments or regimes, I let the data identify which
+also improve predictive-regression fit: after controlling for historical            signals are informative for which funds and when.
+performance, fund characteristics, and other indicators (including fund                 The key contribution is a set of fund-by-signal conditional skill mea-
+and time fixed effects), the model increases the adjusted R-squared by              sures built directly from the TFT variable-importance outputs. These
+more than 25%, indicating that it captures time-varying information                 measures isolate abnormal performance during periods when a par-
+about performance not explained by conventional predictors.                         ticular variable is judged informative for a given fund and predict
+    The interpretable outputs then clarify what the model learns and                future performance specifically when that same signal becomes infor-
+how that information maps into economic mechanisms. Variable impor-                 mative again. This framework yields a more granular, manager-specific
+tance assigns the largest weight to a fund’s own return history (nearly             view of conditional skill than aggregate macro conditioning and links
+29% of decision weight), followed by macro and market variables such                conditional predictability to an explicit, interpretable mechanism.
+as equity market returns, fixed-income spreads, inflation, and Treasury                 Third, this paper contributes to the debate on mutual fund perfor-
+yields. The importance of historical alpha exhibits pronounced season-              mance persistence. The classical literature (e.g., Jensen, 1968, Elton
+ality aligned with corporate earnings cycles. The attention mechanism               et al., 1993, Carhart, 1997, Busse et al., 2010, and Fama and French,
+places systematically higher weight on crisis observations: attention               2010) finds limited evidence that past performance predicts future
+weights during financial crises are approximately 46% higher than in                performance in an unconditional sense.
+non-crisis periods. These patterns suggest that both the content of past                I provide a mechanism-based reconciliation. If funds deploy strate-
+returns and the information environment in which those returns are                  gies whose effectiveness depends on which signals are currently in-
+realized are central to understanding subsequent performance.                       formative, then unconditional persistence can be weak even when
+    Finally, I use the fund-by-month, variable-specific importance                  managers possess skill that is real but episodic. Using the TFT to learn
+weights to define informativeness states and to construct model-based               time-series return patterns and to identify fund-specific informativeness
+conditional skill measures. These measures capture a fund’s abnormal                states, I show that persistence concentrates in the forecasted condi-
+performance during periods when a particular signal is highly infor-                tional component: conditional skill measures predict future abnormal
+mative according to the model, and they predict future performance                  performance when the same signals regain informativeness, and this
+specifically when those signals become informative again. Conditional               predictability persists for up to four years while remaining distinct from
+variables span both macroeconomic indicators (market return, infla-                 coarse macro regimes.
+tion, term spread, default spread) and fundamental proxies (fund past
+returns and month-of-year). The resulting conditional skill measures                2. Data, variable construction, and sample overview
+are persistent for up to four years and remain predictive even after
+controlling for direct macro conditioning, indicating that the persis-              2.1. Data sources
+tence is not driven by macro conditions alone. Overall, the evidence
+supports a state-dependent view of skill: managers’ abilities surface                  This study draws data from several complementary sources. Mutual
+when their preferred signals regain relevance, which helps reconcile                fund returns, total net assets (TNA), expense ratios, turnover ratios,
+the lack of unconditional performance persistence with the presence of              investment objectives, and other fund characteristics come from the
+conditional, time-varying skill.                                                    CRSP Survivorship Bias-Free Mutual Fund database. Portfolio holdings
+    This paper contributes to the emerging machine-learning literature              data are sourced from the Thomson Reuters Mutual Fund Holdings
+on mutual funds and to the broader evidence on conditional fund skill.              (s12) database. I link these two databases using the MFLINKS tables
+
+
+  4                                                                                    5
+     Dynamic variables are time-varying and subject to random variations each            See, for example, Ferson and Schadt (1996), Moskowitz (2000), Cooper
+period. Deterministic variables follow a predetermined path. Static variables       et al. (2004), Mamaysky et al. (2008), Glode and Green (2011), and Kacper-
+remain constant over time.                                                          czyk et al. (2014).
+
+
+                                                                                2
+N. Guo                                                                                                                         Journal of Financial Stability 84 (2026) 101532
+
+
+provided by Wharton Research Data Services (WRDS). All macroeco-                       Table 1
+nomic variables are obtained from Federal Reserve Economic Data                        Summary statistics.
+(FRED).                                                                                 Variables                 Mean         Median      Std          P25          P75
+   The analysis focuses on active U.S. equity funds spanning Jan-                       Fund return & characteristics
+uary 1990 through December 2019.6 Following the established criteria                    Alpha                     −0.12        −0.11       −0.11        −0.97        0.74
+in Kacperczyk et al. (2008), I identify domestic equity funds while                     Flow                      1.75         −0.20       −0.20        −1.34        1.49
+excluding various specialized fund categories.7 Specifically, I remove                  TNA                       1185.01      195.90      195.90       47.30        815.90
+                                                                                        Load                      0.56         1.00        1.00         0.00         1.00
+ETFs, fixed income, international, money market, sector, index, target-
+                                                                                        Cash                      5.00         2.42        2.42         0.70         5.49
+date, and balanced funds from the sample.8 To address potential omis-                   Expense                   1.20         1.15        1.15         0.90         1.46
+sion bias (Elton et al., 2001) and incubation bias (Evans, 2010), I                     Management fee            0.58         0.72        0.72         0.50         0.88
+exclude observations prior to funds’ first offer dates, those with missing              Turnover                  0.92         0.62        0.62         0.33         1.07
+fund names in the CRSP database, and funds with TNA below $5                            Manager Turnover          0.60         0.67        0.43         0.25         1.00
+                                                                                        Total number of funds     3717
+million. The final sample comprises 3717 unique funds with 500,113
+fund-month observations.                                                                Macro variables
+                                                                                        Industry production       1.90         2.66        2.66         0.71         4.03
+                                                                                        Inflation                 2.45         2.49        2.49         1.70         3.07
+2.2. Variable construction
+                                                                                        Oil price                 8.73         5.20        5.20         −12.28       26.67
+                                                                                        T-Bill yield              3.74         0.00        0.00         −3.33        3.85
+2.2.1. Fund performance and characteristics                                             Term spread               0.01         −2.00       −2.00        −15.00       14.00
+    To measure fund performance, I compute alphas based on rolling                      Default spread            −0.04        −1.00       −1.00        −4.00        4.00
+window estimates of factor betas. For each fund-month observation,                      Crisis Dummy              0.09         0.00        0.00         0.00         0.00
+                                                                                        VIX                       1.10         −1.38       −1.38        −8.89        6.79
+I estimate betas using the previous 24 months of returns against the
+                                                                                        Value-weighted return     0.87         1.34        1.34         −1.69        3.53
+CRSP value-weighted excess market return (Mktrf), size (SMB), book-                     S&P 500 return            0.71         1.11        1.11         −1.74        3.25
+to-market (HML), and momentum (UMD) factors from Ken French’s                           Market risk premium       0.67         1.18        1.18         −1.90        3.37
+website. I then use these estimated betas to risk-adjust the fund’s                     Enhanced Sentiment        0.03         0.08        2.07         −1.37        1.46
+current month excess return.                                                           This table presents summary statistics for the sample of active US domestic equity
+    Since the CRSP Mutual Fund database reports multiple share classes                 mutual funds from 1990 to 2019. Fund returns and characteristics are reported at the
+as separate entities, I aggregate them to the fund level. Total net assets             fund level, while macro-level variables are calculated monthly based on information
+                                                                                       available in the previous month. All variables are defined in Appendix A.
+(TNA) represents the sum of assets across all share classes of a fund
+(in $mm). For variables such as cash holdings, turnover ratio, expense
+ratio, and management fees, I calculate TNA-weighted averages across
+all share classes, with values expressed in percentage points. Manager                     Additionally, I incorporate market variables that potentially influ-
+tenure reflects the number of years since a portfolio manager was hired;               ence fund managers’ investment decisions. These market indicators
+when multiple managers oversee a fund, I use the longest tenure. I                     include the percentage change in the CBOE volatility index (VIX),
+create a load dummy variable that equals one if any share class of the                 returns on the CRSP total-return value-weighted index, and S&P 500
+fund charges a load fee, and zero otherwise.                                           index returns. I also include returns from prominent factor models: the
+    To identify fund managers’ unobservable skill, I follow the ex-                    size (SMB), value (HML), profitability (RMW), and investment (CMA)
+tant literature and employ the return gap measure (Kacperczyk et al.,                  factors from the Fama and French five-factor model, as well as the size
+2008) . This monthly measure represents the difference between a                       (𝑅𝑀𝐸 ), investment (𝑅𝐼𝐴 ), profitability (𝑅𝑅𝑂𝐸 ), and expected growth
+fund’s realized gross return and the hypothetical return on its most                   (𝑅𝐸𝐺 ) factors from the Hou et al. (2015) q-factor model.
+recently disclosed portfolio holdings. I define Return Gap as the average                  Complete definitions and sources for all variables used in the ma-
+monthly return gap over the previous 12 months.                                        chine learning models are provided in Appendix A, with summary
+                                                                                       statistics presented in Table 1. All variables are constructed on a
+2.2.2. Macroeconomic and market variables                                              monthly basis using information available at the previous month-end,
+    To capture the macroeconomic environment that may influence                        and any potentially unbounded variables are winsorized at the 1%
+fund performance, I incorporate a comprehensive set of macroeconomic                   extremes to mitigate the influence of outliers.
+variables that prior literature has identified as significant predictors
+of security returns and risks. These include: (1) Industrial Production
+                                                                                       3. Methodology
+Index, (2) Consumer Price Index, (3) Crude Oil Price (WTI), (4) 3-
+month Treasury bill rate, (5) Term spread between 10-year Treasury
+                                                                                       3.1. Predicting mutual fund performance
+and 3-month Treasury bill yields, (6) Default spread between Baa and
+Aaa corporate bond yields, and (7) NBER recession indicators. For
+Industrial Production and Consumer Price indices, I measure the per-                       Traditional approaches to predicting mutual fund performance have
+centage change from a year ago, while the remaining variables (except                  primarily relied on single-period predictive regression models. These
+NBER recession indicators) are calculated as percentage changes from                   models typically incorporate theoretically motivated variables such
+the previous month.                                                                    as return gap (Kacperczyk et al., 2008), active share (Cremers and
+                                                                                       Petajisto, 2009), and risk shifting (Huang et al., 2011) to forecast
+                                                                                       future fund performance. However, such models often fail to utilize
+  6
+     The sample begins in 1990 because several key macroeconomic variables,            the entire historical time-series of fund returns, largely due to the
+including VIX and Oil Price data, become consistently available after this date.       limitations of linear regression when handling numerous potentially
+  7
+     For detailed selection criteria, see Kacperczyk et al. (2008), Appendix A,        correlated variables. While conventional time-series models like ARIMA
+page 2412.
+  8
+                                                                                       (Box et al., 1974) and exponential smoothing (Hyndman et al., 2008)
+     Following Jones and Mo (2021), I identify index funds through both
+                                                                                       can capture temporal patterns such as trends and seasonality, they typ-
+the CRSP index fund flag and by searching fund names for keywords such
+as Exchange-traded, Etf, Dfa, Index, Inde, Indx, Inx, Idx, Dow Jones, Ishare,          ically impose rigid structural assumptions and perform optimally only
+S&P, 500, Wilshire, Russell, Russ, and MSCI. Target-date funds are excluded            when the underlying time-series structure is well understood. These
+by searching for terms like 2055, 2050, 2045, 2040, 2035, 2030, 2025, 2020,            limitations create an opportunity for more flexible approaches that
+2015, 2010, 2005, and Target.                                                          can better capture the complex dynamics of mutual fund performance
+
+                                                                                   3
+N. Guo                                                                                                                     Journal of Financial Stability 84 (2026) 101532
+
+
+without requiring strong a priori assumptions about the data-generating         (2020). Specifically, I calculate the out-of-sample 𝑅2 as:
+process.                                                                                    ∑                               2
+                                                                                              (𝑖,𝑡)∈𝜏𝑂𝑂𝑆 (𝑟𝑖,𝑡+1 − 𝑟̂𝑖,𝑡+1 )
+    Deep neural networks (DNNs) have demonstrated superior per-                 𝑅2𝑂𝑂𝑆 = 1 −        ∑                          ,                                       (1)
+                                                                                                                 2
+formance in time-series forecasting by extracting complex patterns                                   (𝑖,𝑡)∈𝜏𝑂𝑂𝑆 𝑟𝑖,𝑡+1
+without requiring structural assumptions about the data (Rangapuram             where 𝑖 and 𝑡 denote the fund and month indices, respectively, and 𝜏𝑂𝑂𝑆
+et al., 2018, Salinas et al., 2020, Wen et al., 2017). However, standard        represents the out-of-sample period that was never used in model es-
+DNN architectures face significant challenges when applied to financial         timation or hyperparameter tuning. The 𝑅2𝑂𝑂𝑆 metric pools prediction
+data. Financial datasets typically feature small sample sizes with weak         errors across funds and over time to provide a comprehensive panel-
+signal-to-noise ratios (Israel et al., 2020), making them susceptible to        level assessment of each model. Since the denominator uses the sum of
+distortion from irrelevant inputs. Moreover, conventional architectures         squared excess returns without demeaning, this measure quantifies the
+often fail to properly account for the heterogeneity of input types,            proportional reduction in mean squared forecast error (MSFE) achieved
+simply concatenating static features with time-dependent variables. The         by the model relative to a naive benchmark that simply forecasts zero.
+‘‘black-box’’ nature of these models further complicates interpretation,
+as predictions result from complex nonlinear interactions among nu-             3.4. Interpretable variable importance and attention
+merous parameters. Addressing these limitations requires specialized
+architectures designed specifically to handle financial data’s unique               A key advantage of the TFT model is its ability to provide in-
+characteristics while providing interpretable results.                          terpretable variable selection for each data type, including dynamic
+                                                                                inputs, deterministic inputs, and static inputs. The model generates
+3.2. Temporal fusion transformers model                                         several interpretable outputs that will be crucial for understanding the
+                                                                                results in subsequent sections.
+    In this paper, I implement the Temporal Fusion Transformer (TFT)                For historical inputs, the variable selection weights are calculated
+model developed by Lim et al. (2021), leveraging its robust archi-              as:
+tecture to enhance the analysis of mutual fund performance patterns
+(Fig. 1). TFT distinguishes itself through its ability to simultaneously        𝐰𝑖,𝑗,𝑡 = Softmax(𝑓 (𝜀1 , … , 𝜀𝑗 , 𝐜𝑠 )),                                              (2)
+produce multi-horizon forecasts, which allows a comprehensive visual-           where 𝐰𝑖,𝑗,𝑡 represents the vector of variable selection weights for each
+ization of fund performance trajectories over an extended time frame.           historical variable 𝑗 (from the set {𝜀1 , 𝜀2 , … , 𝜀𝑘 }) for fund 𝑖 at time 𝑡,
+This capability is particularly advantageous for financial applications,        𝐜𝑠 denotes the vector of all static inputs, and 𝑓 is a gating module
+where insights into evolving performance patterns substantially benefit         that integrates multiple variables.9 The softmax function normalizes
+strategic decision-making.                                                      these inputs into a probability vector where components sum to one,
+    The architecture of TFT comprises four principal elements, each             effectively quantifying the relative importance of each variable.
+explicitly designed to optimize predictive accuracy and model inter-                These interpretable weights are then used to aggregate inputs into
+pretability in financial time series contexts:                                  the subsequent layer:
+    1. Variable Selection Module: TFT employs a dynamic variable
+selection network that assigns interpretable, period-specific weights to                 ∑
+                                                                                         𝑘
+                                                                                𝑉𝑖,𝑡 =         𝜀𝑖,𝑗,𝑡 𝑤𝑖,𝑗,𝑡                                                          (3)
+each input variable via vector multiplications. This ensures that the                    𝑗=1
+model selectively emphasizes only the most relevant variables at each              In addition to providing interpretable variable importance, the TFT
+time step, effectively filtering noise and directly indicating variable         model employs a self-attention mechanism to capture both short-term
+importance.                                                                     and long-term temporal relationships. This attention mechanism is
+    2. LSTM Encoder and Decoder: Leveraging the strengths of Long               formulated as:
+Short-Term Memory (LSTM) networks, TFT encodes historical obser-
+                                                                                𝐴𝑖,𝑡 = 𝑔(𝑉𝑖,𝑡 ),                                                                      (4)
+vations and static covariates into standardized vectors. These vectors
+capture both temporal dependencies and cross-variable correlations,             where 𝑔 represents a function that encodes the aggregated features 𝑉𝑖,𝑡
+subsequently serving as robust inputs for further predictive analysis.          into a sequence-to-sequence layer followed by attention architectures.
+    3. Attention Matrix: TFT integrates a self-attention mechanism,             The resulting attention weights can be extracted to identify which
+generating an attention matrix that explicitly highlights influential           historical periods are assigned greater importance in the prediction
+historical time periods for forecasting specific future horizons. This          process, providing valuable insights into the model’s temporal focus.
+mechanism enhances the interpretability of temporal dynamics, pro-
+viding direct visibility into which historical points exert significant         4. Predicting mutual fund performance using machine learning
+predictive influence.                                                           models
+    4. Quantile Loss Optimization: TFT uses a quantile loss function
+to generate accurate prediction intervals. The quantile loss ensures that       4.1. Machine learning framework
+predictions capture a range of possible outcomes, which is critical for
+effective risk management and informed financial decision-making.                  This section presents the machine learning framework employed to
+    Collectively, these design elements enable TFT not only to achieve          predict sequences of mutual fund alphas across multiple future periods.
+superior forecasting accuracy but also to provide transparent, action-          The prediction model is defined as:
+able insights into the variables and temporal structures driving mu-
+tual fund performance. For a comprehensive mathematical formulation             𝜶 𝑖,𝑡 = 𝒉(𝐼𝑡−1 ) + 𝝐 𝒊,𝒕 ,                                                            (5)
+and detailed architectural description of the Temporal Fusion Trans-            where 𝜶 𝑖,𝑡 = (𝛼𝑖,𝑡+1 , … , 𝛼𝑖,𝑡+𝑇 ) represents the vector of fund alphas for
+former (TFT) model, including the specific equations governing each             the future T periods after period t, 𝐼𝑡−1 denotes the public information
+component, please refer to Appendix B.                                          set available at 𝑡 − 1, and 𝒉(𝐼𝑡−1 ) = (ℎ𝑖,𝑡+1 (𝐼𝑡−1 ), … , ℎ𝑖,𝑡+𝑇 (𝐼𝑡−1 )) is
+                                                                                a vector-valued function that approximates the expected future fund
+3.3. Model evaluation                                                           alphas. The prediction horizon 𝑇 specifies the length of the sequence
+
+  To assess the predictive performance of fund alpha forecasts, I
+                                                                                   9
+employ an out-of-sample R-squared methodology following Gu et al.                      For static variables, the context vector 𝐜𝑠 is omitted from the calculation.
+
+
+                                                                            4
+N. Guo                                                                                                                 Journal of Financial Stability 84 (2026) 101532
+
+
+
+
+Fig. 1. Basic structure of Temporal Fusion Transformer (TFT) model.
+This figure illustrates the architecture of the Temporal Fusion Transformer (TFT), which combines interpretable attention, gating, and variable selection across
+static and time-varying inputs to support multi-horizon forecasting. Reproduced from Lim et al. (2021).
+
+
+to be forecasted. Throughout the paper, these fund alphas represent the            two critical challenges in time-series forecasting: avoiding regime-
+‘‘target variable’’ in the estimation process.                                     specific calibration bias and preventing information leakage across
+    The information set 𝐼𝑡−1 comprises historical values of various pre-           funds. The framework combines rolling-window cross-validation with
+dictors {𝑧𝑖,𝑠 ∶ 𝑡 − 𝑇 ∗ ≤ 𝑠 < 𝑡}, where the estimation horizon 𝑇 ∗ indicates       cross-sectional fund splitting in a complementary manner.
+the maximum historical time span considered. These predictors fall                     I employ a rolling-window cross-validation scheme with 𝑘 folds that
+into three distinct categories: (1) dynamic inputs that covary with the            span the entire sample period.10 Each fold shifts the training window
+target variables over time (e.g., macroeconomic variables), (2) static             forward by 12 months while maintaining the same window length.
+inputs whose values remain constant over time (e.g., fund style), and              For instance, the first fold trains on 1990–2009 data, the second fold
+(3) deterministic inputs representing characteristics that vary with time          trains on 1991–2010 data, and this pattern continues sequentially. This
+but have values known in advance (e.g., fund age).                                 rolling structure serves two purposes: it allows the model to adapt to
+    The predictors encompass a comprehensive set of variables po-                  evolving market dynamics over time, and it generates multiple out-of-
+tentially influencing fund performance. For dynamic inputs, I include              sample predictions for overlapping time periods, which can be averaged
+fund characteristics (flow, TNA, cash holdings, and equity holdings),              to create more stable forecasts.
+macroeconomic variables (industrial production, inflation, oil price,                  Within each fold’s training period, I further partition the data by
+risk-free rate, default spread, and term spread), and market-related               randomly assigning 80% of funds to a training subset and 20% to
+variables (S&P 500 return, VIX, value-weighted index return, NBER                  a validation subset, using a fixed random seed for reproducibility.
+crisis dummy, factor returns from the Fama–French five-factor model                Critically, this split is based on fund identifiers, not time periods. This
+and Hou et al. (2015) q-factor model, and momentum factor return).                 means the training subset uses 80% of funds over the fold’s entire
+Static inputs comprise fund style, load, and management fee, while                 training window (e.g., all months from 1990–2009 for those selected
+deterministic inputs include the upcoming month of the year and man-               funds in Fold 1), while the validation subset uses the remaining 20%
+ager tenure. To enhance model efficiency and prediction accuracy, all              of funds over the same time window. This cross-sectional approach
+unbounded inputs and target variables are standardized by month (zero              provides three key advantages. First, it prevents fund-level informa-
+mean and unit standard deviation) before implementation. Importantly,              tion leakage—the model never sees data from validation funds during
+due to their distinct characteristics, the TFT model processes dynamic,            training, testing its ability to generalize to completely unseen funds.
+static, and deterministic variables through separate pathways.                     Second, both training and validation subsets contain observations from
+
+4.2. Data partitioning, tuning, and sensitivity analysis
+                                                                                     10
+                                                                                        Given the 1990–2019 sample period and the requirement for sufficient
+   To ensure robust model evaluation while preventing look-ahead                   training data, I implement 𝑘 = 10 folds, with each fold using a 240-month
+bias, I implement a rigorous validation framework that addresses                   (20-year) training window.
+
+
+                                                                               5
+N. Guo                                                                                                                              Journal of Financial Stability 84 (2026) 101532
+
+
+               Table 2
+               Performance comparison of machine learning models.
+                 TFT             OLS              Ridge            Decision tree           AdaBoost          Random forest            NN2              NN3
+                 0.3584          0.0272           0.0052           0.0039                  0.0486            0.0363                   0.0749           0.0392
+
+               This table reports the out-of-sample 𝑅2𝑂𝑂𝑆 based on out-of-sample predictions of different models: (i) TFT model, (ii) OLS model, (iii) ridge OLS
+               regression model, (iv) decision tree model, (v) AdaBoost model, (vi) random forest model, (vii) neural network with two hidden layers (32 and
+               16 neurons), and (viii) neural network with three hidden layers (32, 16, and 8 neurons).
+
+
+the same calendar periods, including normal markets, crises, and recov-                    capabilities, I use the average of future 12-month returns as the target
+eries, which prevents hyperparameter optimization from overfitting to                      variable.
+any specific market regime (e.g., calibrating solely on crisis periods).                       Table 2 presents the out-of-sample 𝑅2 comparison across these
+Third, each fund’s time-series structure remains intact, preserving the                    methods, arranged from simplest to most sophisticated. Unsurpris-
+sequential dependencies crucial for forecasting.                                           ingly, the linear OLS model achieves minimal predictive performance
+    The framework maintains strict information controls at two levels.                     with an 𝑅2 of just 0.02%, largely due to its inability to capture non-
+Within each fold, training and validation funds are completely disjoint                    linear relationships and complex intertemporal patterns. Generalized
+sets—no fund appears in both. This ensures the model learns general-                       linear models like Ridge regression, despite their feature selection
+izable patterns common across fund managers rather than memorizing                         capabilities, show negligible improvement over OLS, suggesting highly
+idiosyncrasies specific to individual funds. Across all folds, chronolog-                  nonlinear relationships among the predictors.
+ical precedence is preserved: standardization parameters (i.e., means                          While decision trees are designed to model nonlinear interactions,
+and standard deviations for each variable) are calculated only from                        a single tree yields an even lower 𝑅2 of 0.004%, likely due to high
+each fold’s training data and applied consistently to that fold’s valida-                  variance leading to poor generalization. Ensemble methods like Ada
+tion and test data. This ensures the model never uses future information                   Boost and Random Forest aggregate information from multiple weak
+in either parameter estimation or feature scaling.                                         learners, improving performance with 𝑅2 values of 0.05% and 0.04%,
+    For hyperparameter optimization, I employ a systematic random                          respectively. Neural networks capture more complex predictor interac-
+search across a predefined parameter space exploring diverse com-                          tions, further improving the 𝑅2 to 0.07% with a two-layer architecture.
+binations of dropout rates, hidden layer sizes, batch sizes, learning                      The TFT model, leveraging its specialized architecture discussed earlier,
+rates, gradient clipping thresholds, and attention mechanisms. For each                    dramatically outperforms all alternatives with an 𝑅2 of 0.35%—nearly
+candidate configuration, I train the model on all k folds and compute                      five times better than the next best approach.
+                                                                                               To further assess the TFT model’s predictive power, I compare it
+the average validation loss across folds. The configuration achieving the
+                                                                                           against traditional mutual fund alpha predictors through panel regres-
+lowest average validation loss is selected, making the hyperparameter
+                                                                                           sion analysis. I define Predicted Alpha as the TFT model’s alpha forecast
+selection more robust to idiosyncrasies of any single time period.
+                                                                                           for a given fund-month combination and estimate the following panel
+    After selecting optimal hyperparameters, I train the final model on
+                                                                                           regression with both year and fund fixed effects:
+each fold using its full training period and generate predictions for
+the subsequent test period. Because the test periods across folds over-                    𝐴𝑙𝑝ℎ𝑎𝑖,𝑡+1 = 𝛽𝐴𝑙𝑝ℎ𝑎 𝑃 𝑟𝑒𝑑𝑖𝑐𝑡𝑜𝑟𝑖,𝑡 + 𝛾𝐶𝑜𝑛𝑡𝑟𝑜𝑙𝑖,𝑦𝑒𝑎𝑟 + 𝛼𝑖 + 𝛼𝑡 + 𝜖𝑖,𝑡                 (6)
+lap (e.g., 2010–2019 appears in multiple folds’ test periods), I create
+                                                                                           where control variables include log(TNA), Fund Flow, Cash Holdings,
+ensemble forecasts by averaging predictions from all folds covering
+                                                                                           Expense Ratio, Management Fee, and Turnover Ratio.
+each fund-month observation. This ensemble approach substantially
+                                                                                               Table 3 presents these results. The coefficient of Predicted Alpha
+improves prediction stability and out-of-sample performance.
+                                                                                           remains statistically significant at the 1% level across all specifications,
+    To enhance model stability, I set the estimation horizon to 72
+                                                                                           even after controlling for established predictors like historical alpha
+months and the prediction horizon to 12 months, requiring funds to
+                                                                                           and return gap. This suggests that the TFT model captures information
+have at least 84 months of continuous observations.11 Untabulated
+                                                                                           orthogonal to traditional measures. To quantify this contribution, I
+sensitivity checks across plausible hyperparameter ranges (attention
+                                                                                           calculate the proportion of adjusted 𝑅2 attributable to Predicted Alpha
+heads, sequence lengths, learning rates) produce virtually identical al-
+                                                                                           by measuring the increase in adjusted 𝑅2 when adding this variable to
+phas (±10 bps) and out-of-sample R2 (±1%), confirming that the model
+                                                                                           the regression model. Remarkably, Predicted Alpha consistently con-
+learns generalizable patterns rather than regime-specific artifacts. Com-
+                                                                                           tributes approximately 20% of the model’s overall explanatory power,
+plete implementation details, including the specific fold configurations,
+                                                                                           even in the most comprehensive specification that includes all control
+hyperparameter ranges, and optimization protocols, are provided in
+                                                                                           variables and fixed effects.
+Appendix C.                                                                                    To further validate that the model captures fund-level skill rather
+                                                                                           than just manager-specific traits, I examine the impact of manager
+4.3. Performance comparison                                                                turnover. As shown in the Online Appendix (Table OA.1 and Ta-
+                                                                                           ble OA.2), the model’s predictive power and the conditional persis-
+    To evaluate the TFT model’s performance, I conduct a compre-                           tence of performance remain robust even after controlling for manager
+hensive comparison against multiple modeling approaches: generalized                       turnover. It suggests that the ‘‘skill’’ is likely capturing a fund-level
+linear models (OLS, Lasso, Ridge, and Elastic Net), tree-based models                      strategy or institutional capability that persists even when individual
+(Decision Tree, Ada Boost, and Random Forest), and feed-forward neu-                       managers change.
+ral networks with varying complexity (two and three hidden layers).                            While Table 3 establishes that Predictive Alpha contains information
+Unlike the TFT model, these alternative approaches don’t differenti-                       about future performance that is incremental to traditional predictors,
+ate between dynamic, static, and deterministic variables. Therefore, I                     the next step is to understand what the model is learning and when that
+concatenate all covariates across the full 72-month estimation horizon                     information is economically meaningful. To do so, I use the model’s
+as inputs, resulting in a total of 72 × (1 + 33) = 2448 features. Addi-                    variable-importance outputs to construct fund-by-month informative-
+tionally, since these alternative models lack multi-horizon forecasting                    ness states—periods in which a given macroeconomic or fundamental
+                                                                                           variable is particularly informative for a specific fund. I then define
+                                                                                           V.I. Conditional Alpha as the fund’s realized alpha during past high-
+ 11
+    The results remain robust under different estimation horizons, including               informativeness periods and test whether performance persistence is
+60 months and 48 months.                                                                   concentrated precisely when the model identifies similar informative
+
+                                                                                       6
+N. Guo                                                                                                                              Journal of Financial Stability 84 (2026) 101532
+
+
+               Table 3
+               Regression analysis of model-predicted fund performance.
+                                              (1)                 (2)                 (3)                  (4)                (5)                  (6)
+                Dependent variables                                                                Alpha
+
+
+                Predicted alpha               0.387***            0.399***            0.332***             0.344***           0.342***             0.355***
+                                              (11.95)             (13.99)             (10.40)              (10.57)            (11.18)              (11.46)
+                Historical alpha                                                                           −0.014***                               −0.014***
+                                                                                                           (−3.34)                                 (−3.63)
+                Return gap                                                                                                    −3.061               −3.100
+                                                                                                                              (−0.77)              (−0.77)
+                Log (TNA)                     0.001               −0.123***           −0.132***            −0.133***          −0.139***            −0.140***
+                                              (0.27)              (−8.17)             (−8.66)              (−8.69)            (−9.45)              (−9.43)
+                Fund flow                     0.400*              −1.250***           −1.284***            −1.265***          −1.340***            −1.320***
+                                              (1.92)              (−4.64)             (−4.77)              (−4.72)            (−5.19)              (−5.12)
+                Cash holdings                 −0.001              −0.001              −0.001               −0.001             −0.001               −0.001
+                                              (−1.27)             (−0.40)             (−0.35)              (−0.38)            (−0.56)              (−0.58)
+                Expense ratio                 −7.025***           −3.840              1.801                1.957              −4.349               −4.123
+                                              (−3.76)             (−0.36)             (0.17)               (0.18)             (−0.43)              (−0.40)
+                Management fee                0.036*              −0.067              −0.054               −0.056             0.001                −0.000
+                                              (1.66)              (−0.99)             (−0.84)              (−0.86)            (0.02)               (−0.01)
+                Turnover ratio                −0.018**            −0.011              −0.009               −0.009             −0.010               −0.009
+                                              (−2.51)             (−1.59)             (−1.33)              (−1.33)            (−0.54)              (−0.53)
+
+                Fund fixed effect             No                  Yes                 Yes                  Yes                Yes                  Yes
+                Year fixed effect             Yes                 No                  Yes                  Yes                Yes                  Yes
+                Observations                  106,067             106,067             106,067              106,067            100,787              100,787
+                Adjusted R-squared            0.007               0.009               0.011                0.011              0.011                0.011
+                Predicted Alpha
+                R2 Contribution               84.35%              37.93%              23.95%               24.55%             24.71%               25.15%
+
+               This table reports the regression of future fund alpha on the predicted alpha from the TFT model, historical alpha over the previous 12 months,
+               return gap, and other fund characteristics. Variables are defined in Appendix A. The t -statistics, in parentheses, are based on standard errors
+               clustered by funds. ***, **, * denote statistical significance at the 0.01, 0.05, and 0.10 levels, respectively.
+
+
+
+
+conditions going forward. Historical Alpha serves as an unconditional                       5. Model explanation
+benchmark, and Macro Conditional Alpha provides a robustness check
+that distinguishes model-identified informativeness states from coarse,                        While Section 4 validates the predictive performance of the TFT
+economy-wide macro regimes.                                                                 model, this section uses its interpretable outputs to identify what drives
+                                                                                            that performance. A key advantage of the TFT is that it provides
+4.4. Diagnostic portfolio evidence of performance dispersion                                transparent information about how it weights variables and histori-
+                                                                                            cal periods through its variable selection network and self-attention
+    To summarize the model’s ability to rank mutual funds by predicted                      mechanisms.
+conditional performance, I construct diagnostic portfolio sorts based
+on predicted alphas. These portfolios are not intended to represent
+                                                                                            5.1. Variable importance analysis
+feasible investment strategies, but rather to provide a transparent and
+familiar summary of cross-sectional dispersion implied by the model.
+                                                                                                The TFT model allows for opening the model black box with its
+For each fund 𝑖 at time 𝑡, I generate predicted monthly alphas for the
+                                                                                            explainable output—variable importance measures from the variable
+subsequent 12-month period (𝑡 + 1, … , 𝑡 + 12). Using these predictions,
+I sort funds into decile portfolios each month and construct equally-                       selection network (described in Section 3.4). The variable importance
+weighted portfolios that are rebalanced monthly. I then evaluate the                        𝑤𝑖,𝑗,𝑡 , from Eq. (2), represents the weight of each variable 𝑗 of fund 𝑖
+performance of these portfolios by calculating their average monthly                        at time 𝑡. This structure provides a dynamic interpretation of relative
+Carhart four-factor alphas over the following year.                                         variable importance for each fund at different times.
+    As shown in Column 1 of Table 4, the diagnostic portfolio con-                              I first average 𝑤𝑖,𝑗,𝑡 across funds and overtime to understand the
+structed by taking the top decile minus the bottom decile exhibits a                        overall variable importance. Fig. 2 reports the rank of overall variable
+monthly alpha spread of 23.24 basis points, equivalent to an annualized                     importance in the model. Consistent with the time-series design of
+alpha spread of 2.8%. This difference is statistically significant at                       the TFT model, the historical alpha is the most prominent variable,
+the 1% level, confirming the model’s ability to identify meaningful                         accounting for 28.8% of the model’s decision weight. This suggests that
+performance differentials among funds. While shorting mutual funds                          a fund’s own return history and its correlation with other variables
+is generally not feasible, this spread serves as a robust measure of the                    conveys the most information in predicting future performance. This
+model’s cross-sectional ranking power.                                                      finding aligns with the notion that funds’ past performance patterns,
+    To examine whether this performance advantage persists over                             when properly interpreted through a nonlinear model, contain valuable
+longer horizons, I maintain the same portfolio allocations and track                        signals about their investment strategies and skill.
+their performance over the subsequent five years. Remarkably, the top-                          Following historical alpha, several macroeconomic and market vari-
+minus-bottom spread continues to reflect both persistent cross-sectional                    ables emerge as the next most important predictors. These include
+differentiation and statistically significant abnormal performance for                      equity market returns (particularly the S&P 500 index), fixed income
+up to four years, with a monthly alpha spread of 22.21 basis points in                      spread metrics (default spread and term spread), and monetary policy
+the fourth year. This persistent dispersion suggests that the TFT model                     indicators (inflation and Treasury yields). The prominence of these vari-
+successfully identifies funds with sustainable skill rather than merely                     ables suggests that the model captures when funds are more exposed
+capturing short-term performance fluctuations.                                              to, or benefit from, particular information environments.
+
+                                                                                      7
+N. Guo                                                                                                                            Journal of Financial Stability 84 (2026) 101532
+
+
+                       Table 4
+                       Persistence of fund performance.
+                                                                                         Prediction horizon
+                                            0–12 months          12–24 months             24–36 months        36–48 months           48–60 months
+                        Bottom              −25.46               −19.16                   −22.10              −21.44                 −9.10
+                        2                   −20.90               −17.91                   −18.98              −18.60                 −15.20
+                        3                   −16.90               −16.35                   −20.06              −20.26                 −13.71
+                        4                   −18.09               −14.19                   −20.30              −17.91                 −13.30
+                        5                   −10.92               −12.77                   −14.25              −15.47                 −7.88
+                        6                   −12.86               −12.55                   −11.80              −12.84                 −13.83
+                        7                   −11.51               −12.66                   −9.68               −11.75                 −13.25
+                        8                   −7.75                −10.96                   −7.59               −8.65                  −8.49
+                        9                   −6.16                −6.65                    −4.79               −4.83                  −2.97
+                        Top                 −1.79                −2.18                    2.43                −0.65                  −5.14
+
+                        Top–Bottom          23.67***             16.97***                 24.53***            20.79***               3.96
+                        𝑡-Statistic         (9.68)               (6.14)                   (8.00)              (5.81)                 (0.92)
+
+                       This table reports the persistence analysis results of the TFT model. It presents monthly Carhart four-factor alphas (in basis
+                       points) for decile portfolios formed based on the TFT model’s predictions across different time horizons: (i) 0–12 months,
+                       (ii) 12–24 months, (iii) 24–36 months, (iv) 36–48 months, and (v) 48–60 months. The results reflect 84 individual monthly
+                       observations over the 2012m1–2019m12 out-of-sample period. The t -statistics, in parentheses, are based on standard errors
+                       clustered by funds. ***, **, * denote statistical significance at the 0.01, 0.05, and 0.10 levels, respectively.
+
+
+5.2. Seasonal patterns in historical alpha importance                                      This pattern remains consistent across different fund categories and
+                                                                                           persists even when controlling for other factors like fund size, style,
+    I continue to examine the variable importance of the most important                    and fund flow.
+variable: historical alpha (denoted as 𝐴𝑙𝑝ℎ𝑎 𝐼𝑚𝑝𝑜𝑟𝑡𝑎𝑛𝑐𝑒). When ana-                            The heightened attention on crisis periods suggests that extreme
+lyzing 𝐴𝑙𝑝ℎ𝑎 𝐼𝑚𝑝𝑜𝑟𝑡𝑎𝑛𝑐𝑒 over 12-month windows, I discover a striking                       market conditions may provide particularly valuable information about
+seasonal pattern that appears to be aligned with corporate earnings                        fund managers’ true capabilities and investment approaches. These
+cycles. Within the sample, I aggregate 𝐴𝑙𝑝ℎ𝑎𝐼𝑚𝑝𝑜𝑟𝑡𝑎𝑛𝑐𝑒 across all funds                    crisis periods represent environments where the differences in fund
+and calendar months of the year and then aggregate the number of                           strategies become more pronounced and consequential. When market
+earnings-related announcements of public companies in each calendar                        conditions shift dramatically, fund managers must adapt their strategies
+month of the year.                                                                         or reveal limitations in their approach. This finding aligns with the cen-
+    Fig. 3 plots the relationship between the one-month-ahead                              tral theme of my subsequent analysis: fund managers possess specific
+𝐴𝑙𝑝ℎ𝑎 𝐼𝑚𝑝𝑜𝑟𝑡𝑎𝑛𝑐𝑒 and the number of earnings announcements in the                           skills that emerge under particular market conditions, and these skills
+month. The figure reveals that the pattern of one-month-ahead al-                          become most visible during periods of significant market stress.
+pha importance closely tracks the number of earnings announcements
+throughout the year, with both series showing notable peaks in the                         6. Model-based conditional performance persistence
+months following major earnings seasons. This alignment suggests that
+the model effectively identifies periods when fund returns are most                            The model’s recognition of the conditional nature of fund skill helps
+sensitive to fundamental information flows in the market.                                  explain its ability to detect persistent patterns in fund performance.
+    This finding extends the work of Pinnuck (2005), who found that                        This insight provides a new perspective on one of the most fundamental
+earnings information explains approximately 25% of a mutual fund’s                         questions in the mutual funds literature: whether mutual fund perfor-
+average monthly abnormal performance. My results suggest that skilled                      mance is persistent. The most influential paper on this subject, Carhart
+fund managers may be particularly adept at processing earnings-related                     (1997), uses the net alpha earned by investors to measure managerial
+information and that the TFT model can identify this temporal pattern                      skill and concludes that there is no evidence of skilled or informed
+in historical returns. The seasonal variation in variable importance                       mutual fund managers. Fama and French (2010) use alpha measures
+highlights how the model adapts its focus based on the information                         to obtain a cross-sectional distribution of managerial talent and find
+content of different calendar periods, rather than applying a static                       evidence of inferior and superior performance only in the extreme tails
+weighting scheme.                                                                          of the cross-section of mutual fund performance. More recently, Berk
+                                                                                           and van Binsbergen (2015) propose a new value-generated measure
+5.3. Attention analysis across market regimes                                              for mutual fund skill and find that performance persistence exists
+                                                                                           over longer time horizons. The interpretable features of my model
+    Beyond variable importance, the TFT model’s self-attention mech-                       allow me to examine performance persistence through a more nuanced
+anism provides additional insights into which historical time periods                      lens—specifically when predictive variables are most informative.
+contain the most valuable information for predicting future returns. The
+attention mechanism, described in Eq. (4), assigns weights to different                    6.1. Variable importance conditional alpha
+historical observations based on their relevance for forecasting.
+    Fig. 5 visualizes the average attention weights assigned by the                            The model’s predictive power derives from its ability to capture
+model across the entire sample period. The most striking pattern in                        fund skills embedded in dynamic strategies. To better understand how
+this visualization is the model’s tendency to assign significantly higher                  mutual fund managers adopt dynamic investment strategies, I construct
+attention weights to observations during financial crisis periods (high-                   model-based conditional skill measures that depend on the inferred
+lighted in blue) compared to normal market conditions. This sug-                           informativeness of macroeconomic and fundamental variables. Specif-
+gests that fund behavior during crisis periods reveals particularly valu-                  ically, I measure the abnormal performance during periods when the
+able information about their risk management capabilities, investment                      model identifies particular variables as highly informative.
+strategies, and potential future performance.                                                  For each fund 𝑖, I calculate the variable importance conditional
+    Quantitatively, the attention weights during NBER-defined reces-                       alpha (V.I. conditional alpha) as the average Carhart four-factor alpha
+sion periods are approximately 46% higher than in non-crisis periods.                      during variable-specific high-informativeness periods over the past five
+
+                                                                                     8
+N. Guo                                                                                                              Journal of Financial Stability 84 (2026) 101532
+
+
+
+
+Fig. 2. Variable importance in the temporal fusion transformer model.
+This figure displays the relative importance of all variables in the TFT model for the period from January 1990 to December 2009. For each variable, the
+importance weights are first averaged across all funds and then across all months, with results expressed in percentage points. All variables are defined in
+Appendix A.
+
+
+years. A high-informativeness period (low-informativeness period) is             of 80 percent of other funds in the same month. Importantly, these
+defined as months when the variable importance assigned by the                   variable importance weights are obtained strictly from the in-sample
+model to a particular variable for a fund exceeds (falls below) that             model estimation (1990–2009), ensuring no information leakage or
+
+                                                                             9
+N. Guo                                                                                                                  Journal of Financial Stability 84 (2026) 101532
+
+
+
+
+Fig. 3. Variable importance of returns and frequency of earnings announcements.
+This figure plots the relationship between the one-month ahead variable importance of mutual fund risk-adjusted returns (alphas) and the number of earnings
+announcements in the corresponding month. The variable importance of mutual fund alphas is first averaged across all funds and then averaged across all years
+in the sample for each calendar month. Blue-shaded regions indicate NBER-defined economic recession periods. The higher attention weights during crisis periods
+suggest these timeframes contain particularly valuable information for predicting future fund performance.
+
+
+
+
+Fig. 4. Conditional performance persistence.
+This figure plots confidence intervals of subsequent one-year performance based on V.I. conditional alpha rankings during high and low informativeness periods
+for both macroeconomic and fundamental variables. V.I. conditional alpha is calculated as the average Carhart’s four-factor alpha during periods when a variable
+is highly informative over the past five years. High (low) informativeness is defined as months when the variable importance for a specific fund exceeds (falls
+below) that of 80 percent of other funds in the same month. For each calendar year from 2010 to 2019, funds are sorted into quintile portfolios based on their
+V.I. conditional alpha. Future performance is then separated into high and low informativeness periods. The 𝑥-axis represents the V.I. conditional alpha quintile
+rank, while the 𝑦-axis shows the Carhart’s four-factor alpha.
+
+
+look-ahead bias in the construction of the conditional alphas for the               continue to earn high alpha when the same type of informativeness
+out-of-sample evaluation period. The conditional variables fall into                state reappears in the future.
+two distinct categories: (1) macroeconomic variables, including market                  Table 5 reports the correlation matrix of V.I. conditional alphas
+return, inflation, term spread, and default spread, and (2) fundamental             across different macroeconomic and fundamental variables. The gen-
+variables, including fund past returns and month-of-year indicators.                erally low correlations among these measures suggest that they cap-
+    Intuitively, this construction defines a fund-specific informativeness          ture distinct dimensions of fund skill. For example, the measure de-
+state: a month in which the model places unusually high weight on                   rived from month-of-year, which captures the seasonality of funda-
+a particular variable for that fund. The central question is whether                mental information, exhibits near-zero correlation with other measures.
+funds that historically earn high alpha in a given informativeness state            Some measures show moderate correlation where their underlying
+
+                                                                               10
+N. Guo                                                                                                                             Journal of Financial Stability 84 (2026) 101532
+
+
+               Table 5
+               Correlation of V.I. Conditional Alpha.
+                                         Market return        Inflation      Term spread         Default spread       Alpha importance         Month of year
+                 Market return           1.00
+                 Inflation               0.22                 1.00
+                 Term spread             −0.43                −0.13          1.00
+                 Default spread          0.14                 0.23           −0.05               1.00
+                 Alpha importance        −0.15                −0.09          0.25                0.00                 1.00
+                 Month of year           0.06                 0.01           0.04                −0.05                −0.04                    1.00
+
+               This table reports the correlations among V.I. conditional alphas based on different macroeconomic and fundamental variables. For each variable,
+               the V.I. conditional alpha is calculated as the average Carhart’s four-factor alpha during periods when that variable is highly informative over
+               the past five years. A period is classified as highly informative (low-informativeness) when the variable importance assigned by the model to
+               a specific variable for a fund exceeds (falls below) that of 80 percent of other funds in the same month.
+
+
+
+
+Fig. 5. Time series of model attention weights across sample period.
+This figure displays the average attention weights assigned by the Temporal Fusion Transformer model across the sample period from 1990 to 2019. For each
+calendar month, the attention value represents the average weight the model assigned to that specific month when making predictions, aggregated across all
+funds and forecast horizons. Blue-shaded regions indicate NBER-defined economic recession periods. The higher attention weights during crisis periods suggest
+these timeframes contain particularly valuable information for predicting future fund performance.
+
+
+
+
+macroeconomic conditions overlap—for instance, the correlation be-                         reveal that conditional skill measures predict fund performance in
+tween inflation-based and market return-based measures is 0.27.                            future periods when the conditioning variables are highly informative.
+                                                                                           Mean alphas increase monotonically and significantly during high-
+6.2. Empirical evidence of conditional performance persistence                             informativeness periods (when the model recognizes similar informa-
+                                                                                           tive conditions in the future). This pattern appears consistently across
+    I first examine performance persistence without conditioning on                        both macroeconomic and fundamental information variables. However,
+model-identified informativeness periods. Following Carhart (1997), I                      no similar pattern emerges during low-informativeness periods. These
+form portfolios of mutual funds based on lagged 12-month Carhart’s                         findings suggest that fund managers’ skills may only manifest under
+four-factor alphas and estimate future 12-month alphas for these port-                     specific conditions—when macroeconomic variables align with their
+folios. On January 1 of each year, I form five equal-weighted portfolios                   investment strategies or when fundamental information is more readily
+of mutual funds using historical alphas. As shown in Fig. 6, these                         available in the market.
+portfolios demonstrate minimal variation in mean alphas, consistent                            To formally test this hypothesis, I conduct panel regression analysis
+with Carhart (1997)’s finding that performance persistence largely                         by estimating the following specification, indexed by fund(𝑖)-month(𝑡),
+disappears after controlling for momentum effects.                                         with both year and style fixed effects, and controlling for Historical
+    I then reform five equal-weighted portfolios using the V.I. con-                       Alpha, log(TNA), and Fund Flow:
+ditional alphas based on different macroeconomic and fundamental
+                                                                                           𝐴𝑙𝑝ℎ𝑎𝑖,𝑡+1 = 𝛽𝑉 .𝐼. 𝐶𝑜𝑛𝑑𝑖𝑡𝑖𝑜𝑛𝑎𝑙 𝐴𝑙𝑝ℎ𝑎𝑖,𝑡 + 𝛾𝐶𝑜𝑛𝑡𝑟𝑜𝑙𝑖,𝑦𝑒𝑎𝑟 + 𝛼𝑖 + 𝛼𝑡 + 𝜖𝑖,𝑡 (7)
+variables over the past five years. The results, presented in Fig. 4,
+
+                                                                                     11
+N. Guo                                                                                                                  Journal of Financial Stability 84 (2026) 101532
+
+
+
+
+Fig. 6. Unconditional performance persistence.
+This figure plots the confidence intervals of subsequent one-year performance by quintile portfolios ranked on historical alpha. For each calendar year from 2010
+to 2019, funds are sorted into quintile portfolios based on their average Carhart’s four-factor alpha over the past 12 months.
+
+
+    Table 6 presents the regression results. The coefficient of Histor-             6.3. Conditional performance persistence in long term
+ical Alpha in column one from Panel A is statistically significant
+but economically modest. In contrast, the coefficients of V.I. Condi-                    To determine whether conditional performance persistence extends
+tional Alpha are both economically and statistically significant during             beyond the short term, I examine the predictive power of V.I. con-
+high-informativeness periods for both fundamental and macroeconomic                 ditional alphas over multiple horizons: (i) 12–24 months, (ii) 24–36
+variables. Notably, Historical Alpha becomes insignificant in these                 months, and (iii) 36–48 months. Table 7 presents the coefficients and
+specifications. In low-informativeness periods, the predictive relation-            t -statistics from regressions of multi-horizon future fund alphas on V.I.
+ship attenuates: when the relevant information environment is absent,               conditional alphas during high-informativeness periods, following Eq.
+strategies that add value in high-informativeness states do not trans-              (7). The results demonstrate that conditional performance persistence
+late into positive future alpha. This asymmetry is consistent with                  remains significant for up to 48 months. This suggests that fund man-
+state-dependent skill rather than unconditional persistence.                        agers apply similar investment strategies when specific information
+
+                                                                               12
+N. Guo                                                                                                                                    Journal of Financial Stability 84 (2026) 101532
+
+
+                    Table 6
+                    Conditional performance persistence.
+                            Panel A: Fundamental conditions
+                                                                 (1)                         (2)                       (3)                     (4)
+                            Dependent variable                                                          Future alpha
+                                                                 Alpha importance                                      Month of the year
+                            Conditions                           High                        Low                       High                    Low
+
+
+                            V.I. Conditional Alpha               0.242***                    −0.023***                 0.105***                0.001
+                                                                 (10.23)                     (−2.94)                   (5.02)                  (0.17)
+                            Historical Alpha                     −0.027                      0.116***                  −0.004                  0.162***
+                                                                 (−0.66)                     (6.42)                    (−0.13)                 (8.52)
+                            Log (TNA)                            0.003***                    0.000***                  −0.000                  −0.000*
+                                                                 (12.50)                     (12.76)                   (−1.18)                 (−1.72)
+                            Flow                                 −0.031***                   −0.003***                 0.004*                  −0.000
+                                                                 (−9.90)                     (−2.82)                   (1.72)                  (−0.20)
+
+                            Time fixed effect                    Yes                         Yes                       Yes                     Yes
+                            Style fixed effect                   Yes                         Yes                       Yes                     Yes
+                            Observations                         18,348                      62,847                    18,462                  64,184
+                            adjust R-squared                     0.204                       0.0808                    0.170                   0.0504
+
+
+
+                     Panel B: Macroeconomics conditions
+                                                 (1)         (2)             (3)         (4)               (5)          (6)         (7)              (8)
+                     Dependent variable                                                            Future Alpha
+                                                 Market return               Term spread                  Inflation                 Default spread
+                     Conditions                  High        Low             High        Low              High          Low         High             Low
+
+
+                     V.I. Conditional Alpha      0.530***    −0.082***       0.439***    −0.065***        0.273***      −0.001      0.118***         −0.005
+                                                 (24.66)     (−7.57)         (14.36)     (−6.67)          (12.46)       (−0.10)     (3.67)           (−0.62)
+                     Historical Alpha            0.057       0.129***        0.058       0.158***         −0.000        0.167***    0.063**          0.166***
+                                                 (1.13)      (6.13)          (1.00)      (7.01)           (−0.00)       (8.60)      (2.35)           (8.96)
+                     Log (TNA)                   −0.006***   0.000***        0.004***    0.000***         −0.006***     0.000***    −0.002***        0.000
+                                                 (−20.34)    (11.94)         (16.21)     (5.63)           (−34.54)      (2.72)      (−18.24)         (0.37)
+                     Flow                        −0.015***   −0.010***       −0.003      0.009***         −0.012***     −0.005***   −0.005           0.001
+                                                 (−4.77)     (−9.86)         (−1.63)     (7.41)           (−5.01)       (−6.00)     (−1.35)          (0.88)
+
+                     Time fixed effect           Yes         Yes             Yes         Yes              Yes           Yes         Yes              Yes
+                     Style fixed effect          Yes         Yes             Yes         Yes              Yes           Yes         Yes              Yes
+                     Observations                18,569      70,509          18,509      64,584           18,375        67,022      18,543           67,227
+                     adjust R-squared            0.231       0.0641          0.204       0.0942           0.239         0.0563      0.175            0.0533
+
+                    This table reports the regression of future fund alpha on V.I. conditional alpha during high and low informativeness periods.
+                    V.I. conditional alpha is calculated as the average Carhart’s four-factor alpha during periods when a specific variable is highly
+                    informative over the past five years. A high-informativeness period (low-informativeness period) is defined as months when the
+                    variable importance assigned by the model to a particular variable for a fund exceeds (falls below) that of 80 percent of other
+                    funds in the same month. Control variables include historical alpha, fund size, and fund flow. The t -statistics, in parentheses, are
+                    based on standard errors clustered by funds. ***, **, * denote statistical significance at the 0.01, 0.05, and 0.10 levels, respectively.
+
+
+types become informative again in the future, consistent with theories                        simply during periods when macroeconomic variables reach certain
+of limited attention and specialization in investment management.                             thresholds.
+                                                                                                  Table 8 helps disentangle two channels: (i) coarse macro regimes
+6.4. Distinguishing model-based from direct macroeconomic conditioning                        that mechanically affect fund opportunities (captured by Macro Condi-
+                                                                                              tional Alpha), and (ii) fund-specific, model-identified informativeness
+    An alternative explanation for these findings could be that fund per-                     states that govern when a manager’s strategy is most effective (cap-
+formance simply persists during periods when actual macroeconomic                             tured by V.I. Conditional Alpha). Once macro tailwinds/headwinds
+variables reach certain thresholds—for instance, during high inflation                        are controlled for, Historical Alpha can regain explanatory power be-
+periods. To differentiate between model-identified informativeness and                        cause it contains residual fund-specific persistence not fully summa-
+raw macroeconomic conditions, I augment Eq. (7) by adding Macro                               rized by macro-threshold regimes. Importantly, V.I. Conditional Alpha
+Conditional Alpha as a control variable. This measure is calculated as                        remains strongly predictive in high-informativeness states, reinforc-
+the average Carhart four-factor alpha during periods when a macroe-                           ing the interpretation that persistence is primarily conditional and
+conomic variable exceeds its 80th percentile threshold in the sample                          state-dependent.
+from 1990m1 to 2019m12.
+    Table 8 presents these results. While Macro Conditional Alpha demon-                      6.5. Conditional performance persistence and fund size
+strates some statistically significant predictive power, its effects are
+inconsistent in direction. For example, funds that perform well when                              Berk and Green (2004) hypothesize that fund performance per-
+market returns are high historically tend to perform worse when market                        sistence is difficult to maintain, especially as funds grow larger, due
+returns are high in the future. Overall, these findings suggest that fund                     to diminishing returns to scale in the mutual fund industry. To test
+performance persists specifically when certain information types are                          whether similar scale effects apply to V.I. conditional performance, I
+particularly informative to funds’ investment processes, rather than                          divide the sample into quintiles based on fund size and examine the
+
+                                                                                        13
+N. Guo                                                                                                                                       Journal of Financial Stability 84 (2026) 101532
+
+
+                    Table 7
+                    Conditional performance persistence in long term.
+                      Market return            Term spread             Inflation            Default spread               Alpha importance           Month of the year
+                      High                     High                    High                 High                         High                       High
+                                                                                       12–24 Months
+                      0.430***                 0.337***                0.196***             0.097***                     0.242***                   0.105***
+                      (20.29)                  (12.31)                 (10.26)              (3.33)                       (10.23)                    (5.02)
+                                                                                       24–36 Months
+                      0.339***                 0.293***                0.169***             0.101***                     0.201***                   0.098***
+                      (13.50)                  (10.54)                 (8.96)               (3.81)                       (8.36)                     (5.21)
+                                                                                       36–48 Months
+                      0.300***                 0.261***                0.127***             0.091***                     0.152***                   0.073***
+                      (15.04)                  (10.19)                 (8.23)               (4.59)                       (6.71)                     (4.01)
+
+                    This table reports the coefficients and t -statistics from regressions of future fund alphas on V.I. conditional alphas during high-informativeness
+                    periods across multiple prediction horizons: (i) 12–24 months, (ii) 24–36 months, and (iii) 36–48 months. V.I. conditional alpha is calculated
+                    as the average Carhart’s four-factor alpha during variable-specific high-informativeness periods over the past five years. A high-informativeness
+                    (low-informativeness) period is defined as months when the variable importance assigned by the model to a particular variable for a fund
+                    exceeds (falls below) that of 80 percent of other funds in the same month. Control variables include historical alpha, fund size, and fund flow.
+                    The t -statistics, in parentheses, are based on standard errors clustered by funds. ***, **, * denote statistical significance at the 0.01, 0.05, and
+                    0.10 levels, respectively.
+
+
+Table 8
+Conditional performance persistence on macro conditional alpha.
+                                      (1)                 (2)                 (3)              (4)                 (5)                 (6)                 (7)                 (8)
+ Dependent variable                                                                                      Future alpha
+                                      Market return                           Term spread                          Inflation                               Default spread
+ Conditions                           High                Low                 High             Low                 High                Low                 High                Low
+
+
+ V.I. Conditional Alpha               0.518***            −0.077***           0.422***         −0.063***           0.274***            −0.006              0.110***            −0.006
+                                      (23.76)             (−7.24)             (13.65)          (−6.45)             (12.49)             (−0.75)             (3.40)              (−0.83)
+ Macro Conditional Alpha              −0.196*             −0.052              −0.253**         −0.083              0.037               0.420***            0.132**             0.149***
+                                      (−1.84)             (−1.00)             (−2.48)          (−1.46)             (0.35)              (5.42)              (2.13)              (2.94)
+ Historical Alpha                     0.060**             0.109***            0.062*           0.143***            −0.000              0.128***            0.051*              0.119***
+                                      (2.00)              (4.92)              (1.74)           (6.19)              (−0.00)             (6.65)              (1.88)              (6.16)
+ Log (TNA)                            −0.005***           −0.000**            0.004***         −0.003***           −0.005***           0.000               −0.002***           −0.001***
+                                      (−18.51)            (−2.22)             (14.55)          (−28.87)            (−31.01)            (1.65)              (−15.76)            (−13.64)
+ Flow                                 −0.015***           −0.009***           −0.004**         0.009***            −0.012***           −0.005***           −0.006*             0.001
+                                      (−4.79)             (−9.84)             (−2.50)          (7.95)              (−4.38)             (−6.03)             (−1.67)             (1.16)
+
+ Time fixed effect                    Yes                 Yes                 Yes              Yes                 Yes                 Yes                 Yes                 Yes
+ Style fixed effect                   Yes                 Yes                 Yes              Yes                 Yes                 Yes                 Yes                 Yes
+ Observations                         18,890              73,180              18,787           67,164              18,688              69,422              18,829              69,665
+ adjust R-squared                     0.241               0.0632              0.212            0.0935              0.242               0.0564              0.172               0.0523
+
+This table reports the regression of future fund alpha on V.I. conditional alpha while controlling for macro conditional alpha. V.I. conditional alpha is calculated as the average
+Carhart’s four-factor alpha during variable-specific high-informativeness periods over the past five years. A high-informativeness period (low-informativeness period) is defined as
+months when the variable importance assigned by the model to a particular variable for a fund exceeds (falls below) that of 80 percent of other funds in the same month. The
+macro conditional alpha is calculated as the average Carhart’s four-factor alpha during periods when a macroeconomic variable exceeds its 80th percentile threshold in the sample
+from 1990m1 to 2019m12. Regressions are presented separately for high-informativeness and low-informativeness periods. Control variables include historical alpha, fund size, and
+fund flow. The t -statistics, in parentheses, are based on standard errors clustered by funds. ***, **, * denote statistical significance at the 0.01, 0.05, and 0.10 levels, respectively.
+
+
+predictive power of V.I. conditional alphas within each quintile using                             6.6. Conditional performance persistence and manager turnover
+Eq. (7).
+                                                                                                       To further validate that the model captures fund-level skill rather
+    Table 9 presents these results. The evidence regarding scale effects is
+                                                                                                   than just manager-specific traits, I examine the impact of manager
+mixed. For measures such as Term Spread and Alpha Importance, the
+                                                                                                   turnover on conditional performance persistence. Following Khorana
+predictive power of V.I. conditional alpha diminishes for the largest                              (2001) and Chevalier and Ellison (1999), manager turnover is measured
+mutual funds (Group 5), consistent with the diminishing returns-to-                                as either a dummy variable indicating any manager change or a con-
+scale hypothesis. However, for other signals like Inflation and Month of                           tinuous turnover rate over a rolling six-year window. As shown in the
+the Year, the predictive relationship remains robust or even strengthens                           Online Appendix (Table OA.2), the interaction between V.I. Conditional
+among the largest funds. To formally test whether these differences                                Alpha and manager turnover is statistically insignificant across most
+are statistically significant, I report the coefficient difference between                         specifications. This indicates that the conditional skill identified by the
+                                                                                                   model is robust to changes in the management team. It suggests that the
+Group 5 and Group 1 using an interaction regression framework. The
+                                                                                                   ‘‘skill’’ is likely capturing a fund-level strategy or institutional capability
+results (bottom row of Table 9) show that most differences are not
+                                                                                                   that persists even when individual managers change.
+statistically significant, with the exception of Month of Year (𝑡 =
+2.02). This heterogeneity suggests that while scale may hinder the                                 7. Conclusion remarks
+exploitation of general inefficiencies, large funds may possess supe-
+rior resources to capitalize on specific complex signals, offsetting the                              This paper proposes a new framework for understanding mutual
+disadvantages of size.                                                                             fund performance through the lens of temporal and state-dependent
+
+                                                                                             14
+N. Guo                                                                                                                             Journal of Financial Stability 84 (2026) 101532
+
+
+               Table 9
+               Conditional performance persistence by fund size.
+                Group             Market return         Inflation        Term spread          Default spread         Alpha importance          Month of year
+                                  High                  High             High                 High                   High                      High
+                5                 0.486***              0.319***         0.311***             0.109**                0.238***                  0.237***
+                                  (10.08)               (6.43)           (5.24)               (2.40)                 (5.28)                    (4.62)
+                4                 0.512***              0.244***         0.476***             0.156                  0.290***                  0.119***
+                                  (10.71)               (5.30)           (9.73)               (1.51)                 (5.10)                    (2.90)
+                3                 0.513***              0.334***         0.453***             0.085*                 0.349***                  0.134***
+                                  (14.45)               (6.66)           (10.66)              (1.94)                 (6.94)                    (3.19)
+                2                 0.501***              0.229***         0.307***             0.094*                 0.331***                  0.072
+                                  (9.65)                (5.01)           (4.36)               (1.88)                 (7.46)                    (1.62)
+                1                 0.523***              0.230***         0.410***             0.067                  0.309***                  −0.011
+                                  (12.44)               (5.58)           (6.85)               (1.46)                 (7.28)                    (−0.19)
+                Diff (5−1)        −0.037                0.089            −0.099               0.042                  −0.071                    0.248**
+                                  (−0.63)               (0.96)           (−0.23)              (0.39)                 (−0.57)                   (2.02)
+
+               This table reports the regression of future fund alpha during high-informativeness periods on V.I. conditional alpha, grouped by fund size. V.I.
+               conditional alpha is calculated as the average Carhart’s four-factor alpha during variable-specific high-informativeness periods over the past
+               five years. A high-informativeness (low-informativeness) period is defined as months when the variable importance assigned by the model to
+               a particular variable for a fund exceeds (falls below) that of 80 percent of other funds in the same month. Control variables include historical
+               alpha, fund size, and fund flow. The bottom row reports the difference between Group 5 and Group 1 coefficients, tested using a pooled
+               regression with an interaction term between V.I. Conditional Alpha and a Large fund dummy (Group 5 = 1, Group 1 = 0). The t -statistics,
+               in parentheses, are based on standard errors clustered by funds. ***, **, * denote statistical significance at the 0.01, 0.05, and 0.10 levels,
+               respectively.
+
+
+
+
+dynamics. Rather than focusing on tradable portfolio strategies, the                      Appendix A. Definitions of variables
+analysis uses machine learning to identify when managerial skill be-
+comes informative and when it persists. The findings offer several
+implications for mutual fund performance evaluation.
+                                                                                           Variable                     Definition
+    First, the Temporal Fusion Transformer model demonstrates supe-
+                                                                                           Alpha                        The Fama–French–Carhart four-factor alpha
+rior predictive power compared to traditional econometric and machine
+                                                                                                                        is the intercept of the rolling window
+learning approaches. A diagnostic long-short portfolio based on the                                                     regression of the monthly net return during
+model’s predictions exhibits a statistically significant annualized alpha                                               24 months on Mktrf, SMB, HML, and UMD
+spread of 2.8%, with dispersion persisting for up to four years.                                                        factors, expressed in percentage points.
+    Second, the model’s interpretable features reveal that predictive                      TNA, Log(TNA)                TNA is a fund’s TNA ($mm) prior to month
+signals are state-dependent. Historical fund returns, macroeconomic                                                     t. Log(TNA) is natural logarithm of a fund’s
+variables, and market states contribute to forecast accuracy, and the                                                   TNA.
+model assigns significantly higher attention weights to observations                       Flow                         The monthly flow for a fund in month t-1,
+during financial crises, suggesting that stress periods are particularly                                                calculated as
+informative about future performance.                                                                                   𝐹 𝑙𝑜𝑤 = 𝑇 𝑁𝐴𝑖,𝑡 ∕𝑇 𝑁𝐴𝑖,𝑡−1 − 1 − 𝑟𝑖,𝑡 , where 𝑟𝑖,𝑡
+    Third, conditional skill measures constructed from the model’s                                                      is the net return in the prior month,
+variable-importance weights indicate that some funds earn alpha pri-                                                    expressed in percentage points.
+marily when particular information types are informative. For example,                     Expense                      The most recent expense ratio prior to
+funds with high inflation-state conditional alpha outperform specifi-                                                   month t.
+cally when inflation is highly informative. These conditional effects                      Turnover                     The most recent turnover ratio prior to
+persist for up to four years.                                                                                           month t.
+    These findings imply that conventional persistence tests can under-                    Load                         Dummy variable if funds have load.
+state skill by averaging across states in which a fund’s strategy is not                   Return Gap                   The Return Gap measure from Kacperczyk,
+informative. Conditioning on model-identified informativeness states                                                    Sialm, and Zheng (2008).
+helps reconcile the difficulty of detecting unconditional persistence                      Cash Holdings                The most recent amount of fund invested in
+with evidence of persistent, state-dependent skill.                                                                     cash prior to month t, expressed in
+    This research contributes to the growing literature applying ma-                                                    percentage.
+chine learning to mutual fund analysis by emphasizing temporal dy-                         Management Fee               The most recent management fees prior to
+namics and fund-specific informativeness states, complementing work                                                     month t.
+that focuses primarily on cross-sectional selection using characteristics.                 Manager Tenure               The number of months since a portfolio
+    Future research could extend this framework to other information                                                    manager is hired. If there are multiple
+environments and to alternative definitions of informativeness states,                                                  managers for a fund, the longest tenure is
+and could use interpretability outputs to construct benchmarks that                                                     used.
+explicitly account for state-dependent skill.                                              Manager Turnover             The rate of portfolio manager turnover for a
+                                                                                                                        fund in a given year.
+CRediT authorship contribution statement                                                   Alpha Mean                   Mean of the alpha in a fund-year.
+                                                                                           Alpha Std                    Standard deviation of the alpha in a
+    Norman (Xuxi) Guo: Writing – review & editing, Writing – origi-                                                     fund-year.
+nal draft, Visualization, Validation, Supervision, Software, Resources,                    Industry production          Percentage change of industry production
+Project administration, Methodology, Investigation, Funding acquisi-                                                    index (INDPRO) from year ago.
+tion, Formal analysis, Data curation, Conceptualization.
+
+                                                                                     15
+N. Guo                                                                                                                   Journal of Financial Stability 84 (2026) 101532
+
+
+ Inflation                    Percentage change of consumer price index           where 𝐜𝑠 is a static context vector derived from static metadata  via
+                              for all urban consumers (CPIAUCSL) from             a static covariate encoder. The input embeddings are further processed
+                              year ago.                                           through individual GRNs and combined using the variable importance
+ Oil price                    Percentage change of crude oil prices:West          weights:
+                              Taxas Intermediate (WTI) from year ago.                     ∑
+                                                                                          𝑚
+ T-Bill yield                 Percentage change of 3-month treasury bill          𝜉̃𝑡 =     𝑣(𝑗)        (𝑗)
+                                                                                             𝑡 ⋅ GRN𝑗 (𝜉𝑡 ).                                                     (B.2)
+                              (TB3MS).                                                    𝑗=1
+
+ Term spread                  Percentage change of the difference between         This mechanism is separately applied to static variables, past inputs,
+                              10-year treasury (GS10) and 3-month                 and known future inputs.
+                              treasury bill (TB3MS).
+ Default spread               Percentage change of the difference between         B.2. LSTM encoder and decoder for local temporal modeling
+                              Baa corporate bond yield (BAA) and Aaa
+                              corporate bond yield (AAA).                            The temporal input embeddings {𝜉̃𝑡 } are passed into a sequence-to-
+ Crisis Dummy                 Crisis dummy defined by NBER.                       sequence architecture composed of LSTM layers:
+ VIX                          Percentage change of The CBOE volatility
+                              index.                                                      • The encoder consumes historical data 𝜉̃𝑡−𝑘∶𝑡 , where 𝑘 is the look-
+ VWRETD                       Return of total return value-weighted index                   back window.
+                              from CRSP.                                                  • The decoder consumes known future inputs 𝜉̃𝑡+1∶𝑡+𝜏max , where 𝜏max
+ SP500                        S&P 500 index return.                                         is the forecast horizon.
+ Mkt-RF                       Market excess return.
+ SMB                          Size factor return in Fama–French                   To incorporate static metadata, initial hidden and cell states of both
+                              five-factor (FF5) Model.                            encoder and decoder LSTMs are initialized using learned projections of
+ HML                          Value Factor return in FF5 Model.                   static context vectors 𝐜ℎ and 𝐜𝑐 . Each temporal step yields an encoded
+ RMW                          Profitability Factor return in FF5 Model.           context vector 𝜙(𝑡, 𝑛) which serves as the basis for further decoding and
+ CMA                          Investment Factor return in FF5 Model.              attention processing.
+ R_ME                         Value Factor return in Hou, Xue, and Zhang
+                              (2015) q-factor (q5) Model.                         B.3. Interpretable multi-head attention for long-term dependencies
+ R_IA                         Investment factor return in q5 Model.
+ R_ROE                        Equity factor return in q5 Model.                       To model long-term temporal relationships, TFT uses a modified
+ R_EG                         Expected growth factor return in q5 Model.          self-attention mechanism. For a sequence of enriched representations
+ Enhanced                     The enhanced investor sentiment index from          𝛩(𝑡) = [𝜃(𝑡, −𝑘), … , 𝜃(𝑡, 𝜏max )], attention weights are computed as:
+ Sentiment                    Baker and Wurgler (2006) and Ung, Gebka,                                  (        )
+                                                                                                          𝑄𝐾 ⊤
+                              and Anderson (2024).                                𝐴(𝑄, 𝐾) = Softmax √                ,                                   (B.3)
+ Announcement                 Percentage of the number of the earning                                         𝑑
+ Count %                      announcement of a fund’s holding in a               Attention(𝑄, 𝐾, 𝑉 ) = 𝐴(𝑄, 𝐾)𝑉 .                                               (B.4)
+                              month as that number of a year.
+ Alpha Importance             Variable importance of the historical alpha         To improve interpretability, TFT uses shared value projections 𝑉 across
+                              in the model.                                       all heads and aggregates attention contributions additively:
+ Macro                        Sum of the variable importance of
+                                                                                       1 ∑
+                                                                                          𝐻
+ Importance                   macroeconomics in the model. The variables          𝐻̃ =       Attention(𝑄𝑊𝑄(ℎ) , 𝐾𝑊𝐾(ℎ) , 𝑉 𝑊𝑉 ).                                 (B.5)
+                                                                                       𝐻 ℎ=1
+                              include Industry Production, Inflation, Oil
+                              Price, T-Bill, Term Spread, Default Spread,         The result 𝐻̃ is passed through residual gating and layer normalization
+                              Crisis Dummy, VIX, VWRETD, SP500,                   to produce attention-enhanced outputs.
+                              Mkt-RF, SMB, HML, RMW, CMA, R_ME, R_IA,
+                              R_ROE, R_EG                                         B.4. Static enrichment and position-wise feed-forward layers
+Appendix B. Detailed explanation of temporal fusion transformer
+(TFT)                                                                                TFT enhances temporal encodings with static metadata using a static
+                                                                                  enrichment layer:
+    This appendix provides a comprehensive mathematical formula-                  𝜃(𝑡, 𝑛) = GRN(𝜙(𝑡, 𝑛), 𝐜𝑒 ),                                                   (B.6)
+tion and detailed architectural description of the Temporal Fusion
+Transformer (TFT) model as proposed by Lim et al. (2021). The TFT                 where 𝐜𝑒 is a context vector from static encoders. These enriched
+architecture is designed for multi-horizon forecasting tasks where di-            outputs are then passed through interpretable attention, residual con-
+verse input types and long-term dependencies complicate prediction.               nections, and a position-wise feed-forward network with gated residual
+The model introduces five integrated components that together deliver             connections:
+both high accuracy and interpretability.
+                                                                                  𝛿(𝑡, 𝑛) = LayerNorm(𝜃(𝑡, 𝑛) + GLU(𝛽(𝑡, 𝑛))),                                   (B.7)
+B.1. Variable selection module                                                    𝜓(𝑡, 𝑛) = GRN(𝛿(𝑡, 𝑛)),                                                        (B.8)
+
+    At each time step 𝑡, the model receives a set of observed and                 ̃ 𝑛) = LayerNorm(𝜙(𝑡, 𝑛) + GLU(𝜓(𝑡, 𝑛))).
+                                                                                  𝜓(𝑡,                                                                           (B.9)
+                                                               (𝑗)
+known input variables 𝐱𝑡 = [𝑥(1)  (2)      (𝑚)
+                             𝑡 , 𝑥𝑡 , … , 𝑥𝑡 ]. Each variable 𝑥𝑡 is first
+transformed into a 𝑑-dimensional embedding vector 𝜉𝑡(𝑗) . The variable
+                                                                                  B.5. Quantile loss optimization for forecast intervals
+selection mechanism then determines relevance scores for each variable
+using a Gated Residual Network (GRN) and softmax normalization:
+                                                                                     TFT directly predicts multiple quantiles 𝑦̂(𝑞)
+                                                                                                                                𝑡+𝜏 for each forecast hori-
+𝐯𝑡 = Softmax(GRN𝑣 ([𝜉𝑡(1) , … , 𝜉𝑡(𝑚) ], 𝐜𝑠 )),                      (B.1)        zon 𝜏 and quantile level 𝑞 ∈ 𝑄. The quantile loss penalizes over- and
+
+                                                                             16
+N. Guo                                                                                                                   Journal of Financial Stability 84 (2026) 101532
+
+
+under-predictions asymmetrically:                                                     Parameters: Batch size of 128, learning rate of 0.001 with Adam opti-
+                                                                                      mizer, ReduceLROnPlateau scheduler (factor=0.5, patience=5), gradi-
+      ̂ 𝑞) = 𝑞 ⋅ (𝑦 − 𝑦)
+𝑄𝐿(𝑦, 𝑦,              ̂ + + (1 − 𝑞) ⋅ (𝑦̂ − 𝑦)+ ,                       (B.10)        ent clipping at 0.1, early stopping patience of 10 epochs, maximum
+where (𝑥)+ = max(0, 𝑥). The overall loss function averaged across all                 of 100 epochs, and quantile loss function predicting 10th, 50th, and
+quantiles and horizons is:                                                            90th percentiles. Data Requirements: Minimum sequence length of 84
+                                                                                      months (72 encoder + 12 decoder), maximum encoder length of 72
+                   ∑𝑀 ∑ 𝜏∑  max
+              1                                                                       months, and monthly cross-sectional standardization (zero mean, unit
+(𝛺, 𝑊 ) =                      𝑄𝐿(𝑦𝑖,𝑡+𝜏 , 𝑦̂(𝑞)
+                                              𝑖,𝑡+𝜏 , 𝑞),               (B.11)
+             𝑀𝜏max 𝑖=1 𝑞∈𝑄 𝜏=1                                                        variance).
+
+where 𝑀 is the number of training samples, and 𝑊 are the trainable
+                                                                                      C.4. Hyperparameter optimization procedure
+parameters of the model.
+   These components collectively enable TFT to generate multi-horizon                     For each candidate hyperparameter configuration in the search
+forecasts with high accuracy and interpretability, effectively balancing              space, the optimization procedure trains the model on all k=10 folds
+model complexity with explainability—critical for financial time series               using the candidate configuration, evaluates performance on each fold’s
+modeling.                                                                             20% validation subset using quantile loss, computes average validation
+                                                                                      loss across all 10 folds, and selects the configuration with lowest
+Appendix C. Model implementation and cross-validation details                         average validation loss. The search space explores hidden size {128,
+                                                                                      256, 512}, attention heads {2, 4, 8}, dropout {0.1, 0.2, 0.3, 0.4},
+    This appendix provides comprehensive implementation details for                   learning rate {0.0001, 0.001, 0.01}, and batch size {64, 128, 256}.
+the Temporal Fusion Transformer (TFT) model training, including the
+rolling-window cross-validation framework, hyperparameter optimiza-                   C.5. Ensemble prediction methodology
+tion, and ensemble prediction methodology.
+                                                                                          Final predictions are generated through an ensemble approach
+C.1. Rolling-window cross-validation framework                                        leveraging the overlapping test periods across folds. For each fold, the
+                                                                                      model is trained on its full training period (all funds, no validation
+    The k-fold rolling-window cross-validation scheme implements 10                   split) using optimal hyperparameters and generates predictions for each
+distinct folds spanning the sample period. Each fold is structured with               fund-month in the fold’s test period. For each fund-month observation
+a training window of 240 consecutive months (20 years), with con-                     appearing in multiple folds’ test periods, predictions from all applicable
+secutive folds shifting the training window forward by 12 months,                     folds are averaged. For example, a fund-month observation in January
+generating out-of-sample predictions for periods strictly following each              2015 receives predictions from Folds 1–6 (all folds whose test periods
+training window. The specific configuration for each fold is:                         include 2015), and the final prediction is the average across these
+                                                                                      6 forecasts. This ensemble averaging substantially reduces prediction
+ Fold        Training period            Training QID        Test period               variance and improves stability.
+ 1           Jan 1990–Dec 2009          120–360             Jan 2010–Dec 2019
+ 2           Jan 1991–Dec 2010          132–372             Jan 2011–Dec 2019         C.6. Data preprocessing and feature engineering
+ 3           Jan 1992–Dec 2011          144–384             Jan 2012–Dec 2019
+ 4           Jan 1993–Dec 2012          156–396             Jan 2013–Dec 2019             All input variables undergo standardization before entering the
+ 5           Jan 1994–Dec 2013          168–408             Jan 2014–Dec 2019         model. Dynamic variables are standardized monthly using cross-
+ 6           Jan 1995–Dec 2014          180–420             Jan 2015–Dec 2019
+                                                                                      sectional mean and standard deviation (calculated separately for each
+ 7           Jan 1996–Dec 2015          192–432             Jan 2016–Dec 2019
+                                                                                      calendar month across all funds). Static variables are encoded as
+ 8           Jan 1997–Dec 2016          204–444             Jan 2017–Dec 2019
+ 9           Jan 1998–Dec 2017          216–456             Jan 2018–Dec 2019
+                                                                                      categorical variables (fund style, load indicator). Deterministic vari-
+ 10          Jan 1999–Dec 2018          228–468             Jan 2019–Dec 2019         ables are normalized to [0,1] range (month of year, manager tenure).
+                                                                                      Standardization parameters (means, standard deviations) are calculated
+Note: QID represents the quarter ID encoding where QID = (Year -                      exclusively from each fold’s training data and applied consistently to
+1980) ×4 + Quarter. Test periods begin immediately after the training                 validation and test data, preventing information leakage.
+window to prevent data leakage.
+                                                                                      C.7. Computational resources
+C.2. Cross-sectional fund split within each fold
+                                                                                          Model training was conducted on high-performance computing in-
+    Within each fold’s 240-month training window, funds are randomly                  frastructure: GPU — NVIDIA L40S (46 GB VRAM); System Memory —
+partitioned into training (80%) and validation (20%) subsets based                    128 GB RAM; CPU — 64 cores for parallel data loading; Storage — SSD
+on fund identifiers (wficn) using a fixed random seed (seed=10) for                   with 100 GB available space; Training time per fold — Approximately
+reproducibility. This ensures: (1) training subset uses 80% of funds with             45–60 min; Total training time (11 folds, sequential) — Approximately
+all their observations over the fold’s training window; (2) validation                10 h.
+subset uses the remaining 20% of funds over the same training window;
+(3) no fund appears in both subsets within any fold; and (4) both                     C.8. Software implementation
+subsets span the fold’s entire training period, exposing the model to
+all market regimes within that window.                                                    The model is implemented using the following software stack:
+                                                                                      Python 3.9, PyTorch 2.5.1 (with CUDA 12.1 support), PyTorch Light-
+C.3. Model hyperparameters                                                            ning 2.5.6, PyTorch Forecasting 1.4.0, data processing via pandas 1.5.3
+                                                                                      and numpy 1.24.3, and HDF5 storage using h5py 3.8.0 and tables 3.8.0.
+    The TFT model architecture is configured with the following hyper-                All code is available upon request to facilitate replication.
+parameters, optimized through systematic random search on the valida-
+tion set. Architecture Parameters: Hidden layer size of 256 units, 4 atten-           Appendix D. Supplementary data
+tion heads, dropout rate of 0.3 applied to all layers, single LSTM layer
+for encoder and decoder, estimation horizon (encoder length) of 72                        Supplementary material related to this article can be found online
+months, and prediction horizon (decoder length) of 12 months. Training                at https://doi.org/10.1016/j.jfs.2026.101532.
+
+                                                                                 17
+N. Guo                                                                                                                                       Journal of Financial Stability 84 (2026) 101532
+
+
+References                                                                                       Huang, Jennifer, Sialm, Clemens, Zhang, Hanjiang, 2011. Risk shifting and mutual fund
+                                                                                                      performance. Rev. Financ. Stud. 24, 2575–2616.
+Baker, Malcolm, Wurgler, Jeffrey, 2006. Investor sentiment and the cross-section of              Hyndman, Rob J., Koehler, Anne B., Ord, J. Keith, Snyder, Ralph D., 2008. Springer
+    stock returns. J. Financ. 61, 1645–1680.                                                          Series in Statistics Forecasting with Exponential Smoothing.
+Barras, Laurent, Scaillet, Olivier, Wermers, Russ, 2010. False discoveries in mutual fund        Israel, Ronen, Kelly, Bryan T., Moskowitz, Tobias J., 2020. Can machines ‘learn’
+    performance: Measuring luck in estimated alphas. J. Financ. 65, 179–216.                          finance? J. Invest. Manag. 1–21.
+Berk, Jonathan B., van Binsbergen, Jules H., 2015. Measuring skill in the mutual fund            Jensen, Michael C., 1968. The performance of mutual funds in the period 1945–1964.
+    industry. J. Financ. Econ. 118, 1–20.                                                             J. Financ. 23, 389.
+Berk, B., Green, Richard C., 2004. Mutual fund flows and performance in rational                 Jones, Christopher S., Mo, Haitao, 2021. Out-of-sample performance of mutual fund
+    markets. J. Political Econ. 112, 1269–1295.                                                       predictors. Rev. Financ. Stud. 34, 149–193.
+Box, G.E.P., Jenkins, G.M., MacGregor, J.F., 1974. Some recent advances in forecasting           Kacperczyk, Marcin, Sialm, Clemens, Zheng, Lu, 2008. Unobserved actions of mutual
+    and control. J. Appl. Stat. 23, 158–179.                                                          funds. Rev. Financ. Stud. 21, 2379–2416.
+Busse, Jeffrey A., Goyal, Amit, Wahal, Sunil, 2010. Performance and persistence in               Kacperczyk, Marcin, Van Nieuwerburgh, Stijn, Veldkamp, Laura, 2014. Time-varying
+    institutional investment management. J. Financ. 65, 765–790.                                      fund manager skill. J. Financ. 69, 1455–1484.
+Carhart, Mark M., 1997. On persistence in mutual fund performance. J. Financ. 52,                Kaniel, Ron, Lin, Zihan, Pelger, Markus, Nieuwerburgh, Stijn Van, 2023. Machine-
+    57–82.                                                                                            learning the skill of mutual fund managers. J. Financ. Econ. 150, 94–138.
+Chevalier, Judith, Ellison, Glenn, 1999. Career concerns of mutual fund managers. Q.             Khorana, Ajay, 2001. Performance changes following top management turnover:
+    J. Econ. 114, 389–432.                                                                            Evidence from open-end mutual funds. J. Financ. Quant. Anal. 36, 371–393.
+Cooper, Michael J., Jr., Roberto C. Gutierrez, Hameed, Allaudeen, 2004. Market states            Li, Bin, Rossi, Alberto G., 2020. Selecting mutual funds from the stocks they hold: A
+    and momentum. J. Financ. 59, 1345–1365.                                                           machine learning approach. Available at SSRN 3737667.
+Cremers, K.J. Martijn, Petajisto, Antti, 2009. How active is your fund manager a new             Lim, Bryan, Arik, Sercan O., Loeff, Nicolas, Pfister, Tomas, 2021. Temporal fusion
+    measure that predicts performance. Rev. Financ. Stud. 22, 3329–3365.                              transformers for interpretable multi-horizon time series forecasting. Int. J. Forecast.
+DeMiguel, Victor, Gil-Bazo, Javier, Francisco, J. Nogales, Santos, André A.P., 2023.                  37, 1748–1764.
+    Machine learning and fund characteristics help to select mutual funds with positive          Mamaysky, Harry, Spiegel, Matthew, Zhang, Hong, 2008. Estimating the dynamics of
+    alpha. J. Financ. Econ. 150, 103737.                                                              mutual fund alphas and betas. Rev. Financ. Stud. 21, 233–264.
+Elton, Edwin J., Martin, J. Gruber, Blake, Christopher R., 2001. A first look at the             Moskowitz, Tobias J., 2000. Mutual fund performance: An empirical decomposition into
+    accuracy of the CRSP mutual fund database and a comparison of the CRSP and                        stock-picking talent, style, transactions costs, and expenses: Discussion. J. Financ.
+    morningstar mutual fund databases. J. Financ. 56, 2415–2430.                                      55, 1695–1703.
+Elton, Edwin J., Martin, J. Gruber, Das, Sanjiv, Hlavka, Matthew, 1993. Efficiency with          Pinnuck, Matt, 2005. What is the abnormal return performance of mutual funds due
+    costly information: A reinterpretation of evidence from managed portfolios. Rev.                  to private earnings information? J. Contemp. Account. Econ. 1, 193–215.
+    Financ. Stud. 6, 1–22.                                                                       Rangapuram, Syama Sundar, Seeger, Matthias, Gasthaus, Jan, Stella, Lorenzo,
+Evans, Richard B., 2010. Mutual fund incubation. J. Financ. 65, 1581–1611.                            Wang, Yuyang, Januschowski, Tim, 2018. Deep state space models for time series
+Fama, Eugene F., French, Kenneth R., 2010. Luck versus skill in the cross-section of                  forecasting. Adv. Neural Inf. Process. Syst. 2018-Decem, 7785–7794.
+    mutual fund returns. J. Financ. 65, 1915–1947.                                               Salinas, David, Flunkert, Valentin, Gasthaus, Jan, Januschowski, Tim, 2020. DeepAR:
+Ferson, Wayne E., Schadt, Rudi W., 1996. Measuring fund strategy and performance                      Probabilistic forecasting with autoregressive recurrent networks. Int. J. Forecast.
+    in changing economic conditions. J. Financ. 51, 425–461.                                          36, 1181–1191.
+Glode, Vincent, Green, Richard C., 2011. Information spillovers and performance                  Ung, Steven N., Gebka, Bartosz, Anderson, Robert D.J., 2024. An enhanced investor
+    persistence for hedge funds. J. Financ. Econ. 101, 1–17.                                          sentiment index. Eur. J. Financ. 30, 827–864.
+Gu, Shihao, Kelly, Bryan, Xiu, Dacheng, 2020. Empirical asset pricing via machine                Wen, Ruofeng, Torkkola, Kari, Narayanaswamy, Balakrishnan, Madeka, Dhruv, 2017.
+    learning. Rev. Financ. Stud. 33, 2223–2273.                                                       A multi-horizon quantile recurrent forecaster.
+Hou, Kewei, Xue, Chen, Zhang, Lu, 2015. Digesting anomalies: An investment approach.
+    Rev. Financ. Stud. 28, 650–705.
+
+
+
+
+                                                                                            18
+
